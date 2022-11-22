@@ -55,7 +55,11 @@ int main(int argc, char *argv[]) {
     if (bind(sfd, rp->ai_addr, rp->ai_addrlen) == 0)
       break;                  /* Success */
 
+#ifdef __LINUX__
     close(sfd);
+#else
+    closesocket(sfd);
+#endif
   }
 
   if (rp == NULL) {               /* No address succeeded */
@@ -82,7 +86,7 @@ int main(int argc, char *argv[]) {
         service, NI_MAXSERV, NI_NUMERICSERV);
     if (s == 0)
       printf("Received %zd bytes from %s:%s\n\"%s\"\n",
-          nread, host, service, buf);
+          nread, host, service, buf), fflush(stdout);
     else
       fprintf(stderr, "getnameinfo: %s\n", gai_strerror(s));
 

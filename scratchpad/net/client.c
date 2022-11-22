@@ -61,7 +61,11 @@ int main(int argc, char *argv[]) {
     if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
       break;                  /* Success */
 
+#ifdef __LINUX__
     close(sfd);
+#else
+    closesocket(sfd);
+#endif
   }
 
   if (rp == NULL) {               /* No address succeeded */
