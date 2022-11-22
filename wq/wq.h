@@ -1,23 +1,31 @@
 // vim: sw=2 ts=2 expandtab smartindent
 
 #include <stdint.h>
-void _wq_render(uint32_t *pixels, int stride, int size_x, int size_y);
-void _wq_input(char vk);
 
-// typedef struct {
-//   uint8_t *buf;
-//   int len;
-// } EnvStash;
-// void      _wq_env_stash_request(EnvStash *stash);
-// EnvStash *_wq_env_stash_provide(void);
+typedef struct {
+  struct {
+    uint8_t *buf;
+    int len;
+  } stash;
+} Env;
 
+typedef struct {
+  uint32_t *pixels;
+  int stride;
+  struct { int x, y; } size;
+} PixelDesc;
+
+void _wq_render(Env *env, PixelDesc *pd);
+void _wq_update(Env *env);
+void _wq_input (Env *env, char vk);
 
 #ifdef WQ_HOST_ENV // obviously dylib doesn't need to know
 #include "wq/dylib.h"
 
 typedef struct {
-  void (*wq_render)(uint32_t *pixels, int stride, int size_x, int size_y);
-  void (*wq_input)(char vk);
+  void (*wq_render)(Env *env, PixelDesc *pd);
+  void (*wq_update)(Env *env);
+  void (*wq_input )(Env *env, char vk);
 } wq_DylibHook;
 
 static wq_DylibHook wq_dylib_hook_init(void) {
@@ -26,7 +34,8 @@ static wq_DylibHook wq_dylib_hook_init(void) {
   wq_DylibHook ret = {0};
 
   ret.wq_render = dylib_get("_wq_render");
-  ret.wq_input = dylib_get("_wq_input");
+  ret.wq_input  = dylib_get("_wq_input" );
+  ret.wq_update = dylib_get("_wq_update");
 
   return ret;
 }
@@ -35,6 +44,7 @@ static wq_DylibHook wq_dylib_hook_init(void) {
 
 /* good honest christian decls, no satanic DLL trickery */
 #define wq_render _wq_render
+#define wq_update _wq_update
 #define wq_input  _wq_input
 
 #endif

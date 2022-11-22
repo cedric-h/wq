@@ -9,6 +9,11 @@
 #define EXPORT __declspec(dllexport)
 #endif
 
+/* theoretically part of our contract with our environment but i was lazy */
+void *malloc(size_t size);
+void free(void *ptr);
+void *calloc(size_t nmemb, size_t size);
+
 typedef struct {
   uint32_t *pixels;
   int stride;
@@ -34,7 +39,7 @@ static void rcx_char(int px, int py, int scale, char c) {
   for (int y = 0; y < 8*scale; y++) {
     for (int x = 0; x < 8*scale; x++)
       if (fontdata_read(x/scale, y/scale, c))
-        rcx_p(px + x, py + y, 0xFFFFFFFF);
+        rcx_p(px + x, py + y, 0xFFFF0000);
   }
 }
 
@@ -47,27 +52,37 @@ typedef struct {
   char buf[1 << 9];
   int buf_i;
 } State;
-static State state = { .buf = "WASDwasd", .buf_i = sizeof("WASDwasd")-1 };
+static State *state(Env *env) {
+  if (env->stash.buf == NULL || env->stash.len > sizeof(State)) {
+    if (env->stash.buf) free(env->stash.buf);
+    env->stash.buf = calloc(sizeof(State), 1);
+  }
+  return (State *)env->stash.buf;
+}
 
-EXPORT void wq_render(uint32_t *pixels, int stride, int size_x, int size_y) {
-  Rcx __rcx = { .pixels = pixels, .stride = stride, .raw_size = { size_x, size_y } };
+EXPORT void wq_render(Env *env, PixelDesc *pd) {
+  Rcx __rcx = { .pixels = pd->pixels, .stride = pd->stride, .raw_size = { pd->size.x, pd->size.y } };
   _rcx = &__rcx;
 
   /* what's the biggest we can be and preserve 16x9? */
-  float scale = (size_x/16.f < size_y/9.f) ? size_x/16.f : size_y/9.f;
+  float scale = (pd->size.x/16.f < pd->size.y/9.f) ? pd->size.x/16.f : pd->size.y/9.f;
   _rcx->size.x = 16 * scale;
   _rcx->size.y =  9 * scale;
 
   /* clear to black */
-  memset(pixels, 0, size_x * size_y * sizeof(uint32_t));
+  memset(pd->pixels, 0, pd->size.x * pd->size.y * sizeof(uint32_t));
 
   for (int y = 0; y < _rcx->size.y; y++)
     for (int x = 0; x < _rcx->size.x; x++)
       rcx_p(x, y, (y/4%2 == x/4%2) ? 0x22222222 : 0x33333333);
 
-  rcx_str(0, 0, state.buf);
+  rcx_str(0, 0, state(env)->buf);
 }
 
-EXPORT void wq_input(char c) {
-  state.buf[state.buf_i++] = c;
+EXPORT void wq_input(Env *env, char c) {
+  State *ste = state(env);
+  ste->buf[ste->buf_i++] = c;
+}
+
+EXPORT void wq_update(Env *env) {
 }

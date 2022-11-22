@@ -41,7 +41,7 @@ static void  dylib_open(void) {
   CopyFile("./wq.dll", "./wq-hot.dll", 0);
 
   _dylib_dl = LoadLibraryA("./wq-hot.dll");
-  if (_dylib_dl == 0) errmsg(), exit(EXIT_FAILURE);
+  if (_dylib_dl == 0) errmsg(), puts("need dll"), exit(EXIT_FAILURE);
 }
 
 static void *dylib_get(char *path) {

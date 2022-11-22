@@ -20,6 +20,7 @@
 #include "wq/wq.h"
 
 wq_DylibHook wq_lib = {0};
+Env env = {0};
 
 static LRESULT WINAPI WindowProc(
   HWND wnd,
@@ -33,7 +34,7 @@ static LRESULT WINAPI WindowProc(
     } return 0;
 
     case WM_CHAR: {
-      wq_lib.wq_input(wparam);
+      wq_lib.wq_input(&env, wparam);
     } return 0;
 
     // case WM_KEYDOWN: {
@@ -181,7 +182,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
       Assert(SUCCEEDED(hr));
 
       // write pixels directly to this memory
-      wq_lib.wq_render(mapped.pData, mapped.RowPitch/sizeof(uint32_t), width, height);
+      wq_lib.wq_render(&env, &(PixelDesc) {
+        .pixels = mapped.pData,
+        .stride = mapped.RowPitch/sizeof(uint32_t),
+        .size = { width, height }
+      });
 
       ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)cpuBuffer, 0);
       ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)backBuffer, (ID3D11Resource*)cpuBuffer);
