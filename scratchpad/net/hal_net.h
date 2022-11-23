@@ -1,4 +1,5 @@
 #ifdef __LINUX__
+#define closesocket close
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>

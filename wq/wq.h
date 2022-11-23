@@ -2,6 +2,14 @@
 
 #include <stdint.h>
 
+/* how does the game need to be able to interact with the network?
+ *
+ * - know if server is down so they can host
+ * - as server: receive messages from anyone with IDs
+ * - as server: send messages back to those IDs
+ * - as client: communicate (send/receive) with server
+ */
+
 typedef struct {
   struct {
     uint8_t *buf;

@@ -1,21 +1,26 @@
 // vim: sw=2 ts=2 expandtab smartindent
 
-#include "hal_net.h"
-
-// #include <unistd.h>
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+
+#include "hal_net.h"
+#include "server.h"
 
 #define BUF_SIZE 500
 
-static void errmsg(void) {
+static void fatal_err(char *msg) {
+  fprintf(stderr, msg);
+
   char err[256];
   FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(),
       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), err, 255, NULL);
   printf("%s\n", err);//just for the safe case
   puts(err);
+
+  exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[]) {
@@ -25,12 +30,10 @@ int main(int argc, char *argv[]) {
   struct addrinfo hints;
   struct addrinfo *result, *rp;
   int sfd, s, j;
-  size_t len;
-  size_t nread;
   char buf[BUF_SIZE];
 
   if (argc < 3) {
-    fprintf(stderr, "Usage: %s host port msg...\n", argv[0]);
+    fprintf(stderr, "Usage: %s host port ...\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 
@@ -42,7 +45,9 @@ int main(int argc, char *argv[]) {
   hints.ai_flags = 0;
   hints.ai_protocol = 0;          /* Any protocol */
 
-  s = getaddrinfo(argv[1], argv[2], &hints, &result);
+  char *host = argv[1];
+  char *port = argv[2];
+  s = getaddrinfo(host, port, &hints, &result);
   if (s != 0) {
     fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
     exit(EXIT_FAILURE);
@@ -61,11 +66,7 @@ int main(int argc, char *argv[]) {
     if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
       break;                  /* Success */
 
-#ifdef __LINUX__
-    close(sfd);
-#else
     closesocket(sfd);
-#endif
   }
 
   if (rp == NULL) {               /* No address succeeded */
@@ -75,32 +76,45 @@ int main(int argc, char *argv[]) {
 
   freeaddrinfo(result);           /* No longer needed */
 
-  /* Send remaining command-line arguments as separate
-     datagrams, and read responses from server */
+  char t = 't';
+  puts("here");
+  
+  if ((send(sfd, &t, 1, 0), recv(sfd, &t, 1, 0)) < 1) {
+    puts("couldn't reach a server, launching our own");
+    server_init(port);
 
-  for (j = 3; j < argc; j++) {
-    len = strlen(argv[j]) + 1;
-    /* +1 for terminating null byte */
+    send(sfd, &t, 1, 0);
+    server_poll();
 
-    if (len > BUF_SIZE) {
-      fprintf(stderr,
-          "Ignoring long message in argument %d\n", j);
+    if (recv(sfd, &t, 1, 0) < 1)
+      fatal_err("launched server, couldn't reach it");
+  }
+
+  /* we don't want our sockets to block */
+  int polling_api = 1;
+  ioctlsocket(sfd, FIONBIO, &polling_api);
+
+  for (;;) {
+    server_poll();
+
+    char c = 0;
+    if (_kbhit()) {
+      char c = _getch();
+
+      if (send(sfd, &c, 1, 0) < 1)
+        fatal_err("partial/failed write\n");
+    }
+
+    int nread = recv(sfd, buf, BUF_SIZE, 0);
+    if (WSAGetLastError() == WSAEWOULDBLOCK)
       continue;
-    }
+    else if (nread == -1)
+      fatal_err("failed read\n");
 
-    if (send(sfd, argv[j], len, 0) != len) {
-      fprintf(stderr, "partial/failed write\n");
-      errmsg();
-      exit(EXIT_FAILURE);
-    }
+    if (nread > 0)
+      printf("Received %d bytes: %s\n", nread, buf);
 
-    nread = recv(sfd, buf, BUF_SIZE, 0);
-    if (nread == -1) {
-      perror("read");
-      exit(EXIT_FAILURE);
-    }
-
-    printf("Received %zd bytes: %s\n", nread, buf);
+    fflush(stdout);
   }
 
   exit(EXIT_SUCCESS);
