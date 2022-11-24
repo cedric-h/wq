@@ -17,7 +17,6 @@ static void fatal_err(char *msg) {
   char err[256];
   FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, GetLastError(),
       MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), err, 255, NULL);
-  printf("%s\n", err);//just for the safe case
   puts(err);
 
   exit(EXIT_FAILURE);
@@ -30,7 +29,6 @@ int main(int argc, char *argv[]) {
   struct addrinfo hints;
   struct addrinfo *result, *rp;
   int sfd, s, j;
-  char buf[BUF_SIZE];
 
   if (argc < 3) {
     fprintf(stderr, "Usage: %s host port ...\n", argv[0]);
@@ -105,6 +103,7 @@ int main(int argc, char *argv[]) {
         fatal_err("partial/failed write\n");
     }
 
+    char buf[BUF_SIZE];
     int nread = recv(sfd, buf, BUF_SIZE, 0);
     if (WSAGetLastError() == WSAEWOULDBLOCK)
       continue;

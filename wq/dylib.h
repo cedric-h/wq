@@ -38,9 +38,13 @@ static void errmsg(void) {
 
 static void  dylib_open(void) {
   if (_dylib_dl) FreeLibrary(_dylib_dl);
-  CopyFile("./wq.dll", "./wq-hot.dll", 0);
 
-  _dylib_dl = LoadLibraryA("./wq-hot.dll");
+  char my_dll_path[1 << 8] = {0};
+  snprintf(my_dll_path, sizeof(my_dll_path), "./wq-%d.dll", GetCurrentProcessId());
+
+  CopyFile("./wq.dll", my_dll_path, 0);
+
+  _dylib_dl = LoadLibraryA(my_dll_path);
   if (_dylib_dl == 0) errmsg(), puts("need dll"), exit(EXIT_FAILURE);
 }
 

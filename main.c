@@ -9,6 +9,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <intrin.h>
+#include <stdio.h>
+
+#define WQ_HOST_ENV
+#include "wq/wq.h"
+#include "net.h"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxguid.lib")
@@ -16,11 +21,28 @@
 
 #define Assert(cond) do { if (!(cond)) __debugbreak(); } while (0)
 
-#define WQ_HOST_ENV
-#include "wq/wq.h"
+int64_t start = 0, freq = 0;
+static double env_ts(void) {
+  if (start == 0) QueryPerformanceCounter((LARGE_INTEGER *)&start);
+  if ( freq == 0) QueryPerformanceFrequency((LARGE_INTEGER *)&freq);
+
+	int64_t tick = {0};
+	QueryPerformanceCounter((LARGE_INTEGER *)&tick);
+
+	return (double)(tick - start) / (double)freq;
+}
 
 wq_DylibHook wq_lib = {0};
-Env env = {0};
+/* X macro black magic isnt worth it */
+Env env = {
+  .send_to_host = env_send_to_host,
+  .clnt_recv    = env_clnt_recv   ,
+
+  .host_recv    = env_host_recv   ,
+  .send         = env_send        ,
+
+  .ts           = env_ts          ,
+};
 
 static LRESULT WINAPI WindowProc(
   HWND wnd,
@@ -45,6 +67,8 @@ static LRESULT WINAPI WindowProc(
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmdshow) {
+  WSADATA wsa_data;
+  WSAStartup(MAKEWORD(2, 2), &wsa_data);
 
   WNDCLASSEXW wc =
   {
@@ -61,7 +85,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
       WS_EX_APPWINDOW,
       wc.lpszClassName, L"pixels",
       WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+      CW_USEDEFAULT, CW_USEDEFAULT, 16*35, 9*35,
       NULL, NULL, instance, NULL);
   Assert(window);
 
@@ -187,6 +211,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
         .stride = mapped.RowPitch/sizeof(uint32_t),
         .size = { width, height }
       });
+
+      wq_lib.wq_update(&env);
 
       ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)cpuBuffer, 0);
       ID3D11DeviceContext_CopyResource(context, (ID3D11Resource*)backBuffer, (ID3D11Resource*)cpuBuffer);

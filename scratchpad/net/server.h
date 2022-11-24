@@ -1,7 +1,7 @@
 // vim: sw=2 ts=2 expandtab smartindent
 
 #include "hal_net.h"
-#include "hash32.h"
+#include "../../hash32.h"
 
 // #include <unistd.h>
 #include <stdio.h>
@@ -106,6 +106,13 @@ void server_init(char *port) {
   ioctlsocket(sfd, FIONBIO, &polling_api);
 }
 
+static void wsa_log_err(char *extra_msg) {
+  char err[256];
+  FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, NULL, WSAGetLastError(),
+      MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), err, 255, NULL);
+  fprintf(stderr, "%s: %s\n", extra_msg, err);
+}
+
 static void server_poll(void) {
   if (sfd == 0) return;
 
@@ -123,8 +130,14 @@ static void server_poll(void) {
 
     /* no more to read, come back later */
     if (nread == -1) {
-      if (WSAGetLastError() != WSAEWOULDBLOCK)
-        printf("failed request\n");
+      if (WSAGetLastError() != WSAEWOULDBLOCK) {
+        wsa_log_err("server failed to recvfrom");
+        puts("from:");
+        uint32_t hash = sockaddr_hash(
+          (struct sockaddr *) &peer_addr,
+          peer_addr_len
+        );
+      }
       return;
     }
 
@@ -150,6 +163,12 @@ static void server_poll(void) {
     for (int i = 0; i < CLIENTS_MAX; i++) {
       Client *c = clients + i;
       if (!c->active) continue;
+
+      puts("sending to: ");
+      uint32_t hash = sockaddr_hash(
+        (struct sockaddr *) &c->addr,
+        c->addr_len
+      );
 
       if (sendto(sfd, buf, nread, 0,
             (struct sockaddr *) &c->addr,
