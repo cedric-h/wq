@@ -1,6 +1,16 @@
 // vim: sw=2 ts=2 expandtab smartindent
 #include <stdint.h>
 
+typedef enum {
+  WqVk_W     = 17,
+  WqVk_S     = 31,
+  WqVk_A     = 30,
+  WqVk_D     = 32,
+  WqVk_Esc   = 1,
+  WqVk_Tilde = 41,
+  WqVk_MAX,
+} WqVk;
+
 /* --- net --- */
 typedef struct {
   uint32_t hash;
@@ -104,7 +114,7 @@ typedef struct {
 
 void _wq_render(Env *env, PixelDesc *pd);
 void _wq_update(Env *env);
-void _wq_input (Env *env, char vk);
+void _wq_input (Env *env, char vk, int down);
 
 #ifdef WQ_HOST_ENV // obviously dylib doesn't need to know
 #include "wq/dylib.h"
@@ -112,7 +122,7 @@ void _wq_input (Env *env, char vk);
 typedef struct {
   void (*wq_render)(Env *env, PixelDesc *pd);
   void (*wq_update)(Env *env);
-  void (*wq_input )(Env *env, char vk);
+  void (*wq_input )(Env *env, char vk, int down);
 } wq_DylibHook;
 
 static wq_DylibHook wq_dylib_hook_init(void) {

@@ -55,13 +55,17 @@ static LRESULT WINAPI WindowProc(
       PostQuitMessage(0);
     } return 0;
 
-    case WM_CHAR: {
-      wq_lib.wq_input(&env, wparam);
+    // case WM_CHAR: {
+    //   wq_lib.wq_input(&env, wparam);
+    // } return 0;
+
+    case WM_KEYDOWN: {
+      wq_lib.wq_input(&env, HIWORD(lparam) & (KF_EXTENDED | 0xff), 1);
     } return 0;
 
-    // case WM_KEYDOWN: {
-    //   wq_input(HIWORD(lparam) & (KF_EXTENDED | 0xff));
-    // } return 0;
+    case WM_KEYUP: {
+      wq_lib.wq_input(&env, HIWORD(lparam) & (KF_EXTENDED | 0xff), 0);
+    } return 0;
   }
   return DefWindowProcW(wnd, msg, wparam, lparam);
 }

@@ -33,7 +33,7 @@ static uint32_t sockaddr_hash(struct sockaddr *addr, int addr_len) {
     fprintf(stderr, "getnameinfo: %s\n", gai_strerror(s)),
     exit(EXIT_FAILURE);
 
-  printf("hashing %s:%s\n", host, service), fflush(stdout);
+  // printf("hashing %s:%s\n", host, service), fflush(stdout);
 
   return hash32(   host, strlen(   host),
          hash32(service, strlen(service), 0));
@@ -106,8 +106,6 @@ int env_send_to_host(uint8_t *buf, int len) {
 int env_clnt_recv(uint8_t *buf, int *len) {
   int nread = recv(clnt_sfd, (char *)buf, *len, 0);
   *len = nread;
-
-  if (nread > 0) printf("nread: %d\n", nread);
 
   if (WSAGetLastError() == WSAEWOULDBLOCK)
     return 0;
@@ -197,7 +195,7 @@ int env_send(Addr *addr, uint8_t *buf, int len) {
   if (sendto(host_sfd, buf, len, 0,
         (struct sockaddr *) &addr->_store,
         addr->_store_len) != len) {
-    fprintf(stderr, "Error sending response\n");
+    wsa_log_err("env_send (sendto)");
     return 0;
   }
 
