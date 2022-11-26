@@ -1,6 +1,13 @@
 // vim: sw=2 ts=2 expandtab smartindent
 #include <stdint.h>
 
+#ifdef __LINUX__
+  #define EXPORT 
+#else
+  #include <windows.h>
+  #define EXPORT __declspec(dllexport)
+#endif
+
 typedef enum {
   WqVk_W     = 17,
   WqVk_S     = 31,
@@ -112,9 +119,9 @@ typedef struct {
   struct { int x, y; } size;
 } PixelDesc;
 
-void _wq_render(Env *env, PixelDesc *pd);
-void _wq_update(Env *env);
-void _wq_input (Env *env, char vk, int down);
+EXPORT void _wq_render(Env *env, PixelDesc *pd);
+EXPORT void _wq_update(Env *env);
+EXPORT void _wq_input (Env *env, char vk, int down);
 
 #ifdef WQ_HOST_ENV // obviously dylib doesn't need to know
 #include "wq/dylib.h"

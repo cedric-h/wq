@@ -10,7 +10,8 @@ source ~/msvc/setup.sh
 # cl //Zi //c ../wq/wq.c
 # cl //Zi ../main.c wq.obj
 
-tcc -shared -o wq.dll ../wq/wq.c 
+# tcc -shared -o wq.dll ../wq/wq.c 
+cl //LD //O2 -o wq.dll ../wq/wq.c
 
 # dynamic build
 cl //Zi ../main.c

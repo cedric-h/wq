@@ -4,13 +4,6 @@
 #include "wq.h"
 #include "font.h"
 
-#ifdef __LINUX__
-  #define EXPORT 
-#else
-  #include <windows.h>
-  #define EXPORT __declspec(dllexport)
-#endif
-
 /* TODO: worry about this eventually
  * https://stackoverflow.com/questions/2782725/converting-float-values-from-big-endian-to-little-endian/2782742#2782742
  */
@@ -26,11 +19,11 @@ void *calloc(size_t nmemb, size_t size);
 #define MATH_PI  3.141592653589793
 #define MATH_TAU 6.283185307179586
 
+static float lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
+#ifdef CUSTOM_MATH
 static float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
 static float fabsf(float f) { return f < 0 ? -f : f; }
 static float signf(float f) { return f < 0 ? -1 : 1; }
-
-static float lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
 
 // Remez' algorithm approximation
 // https://stackoverflow.com/questions/23837916/a-faster-but-less-accurate-fsin-for-intel-asm
@@ -57,13 +50,17 @@ static float sqrtf(float z) {
 
 	return val.f;		/* Interpret again as float */
 }
+#else
+#define log print_log
+#endif
 
 /* vector fns (only things that don't generalize to N=1) */
 static float mag(float x, float y) { return sqrtf(x*x + y*y); }
 static void norm(float *x, float *y) {
   float m = mag(*x, *y);
-  *x /= m;
-  *y /= m;
+  if (m > 0.0f)
+    *x /= m,
+    *y /= m;
 }
 
 
@@ -114,9 +111,15 @@ typedef struct {
  * not sure if that is actually useful, we may use them exclusively for the networking */
 #define WQ_ENTS_MAX (1 << 10)
 typedef struct {
+  /* --- dbg --- */
   LogNode *log;
+  double frametime_ring_buffer[256];
+  int frametime_ring_index;
+  /* --- dbg --- */
 
   struct {
+    uint32_t last_known_tick;
+
     int am_connected, tries;
     char keysdown[WqVk_MAX];
     ClntEnt ents[WQ_ENTS_MAX];
@@ -125,6 +128,8 @@ typedef struct {
 
   int am_host;
   struct {
+    uint32_t tick_count;
+
     double last, dt_acc;
     Client clients[CLIENTS_MAX];
 
@@ -140,6 +145,8 @@ static State *state(Env *env) {
     env->stash.buf = calloc(sizeof(State), 1);
 
     /* --- init state --- */
+    for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
+
     state(env)->host.next_ent++; /* i need one for my mad hax */
     log(env, "sup nerd");
     /* --- init state --- */
@@ -221,6 +228,8 @@ static void rcx_str(int x, int y, char *str) {
 }
 
 EXPORT void wq_render(Env *env, PixelDesc *pd) {
+  double start_ts = env->ts();
+
   Rcx __rcx = { .pixels = pd->pixels, .stride = pd->stride, .raw_size = { pd->size.x, pd->size.y } };
   _rcx = &__rcx;
 
@@ -238,20 +247,6 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
   for (int y = 0; y < _rcx->size.y; y++)
     for (int x = 0; x < _rcx->size.x; x++)
       rcx_p(x, y, (y/4%2 == x/4%2) ? 0x22222222 : 0x33333333);
-
-  /* log */
-  {
-    _rcx->cfg.text_color = 0xBBBBBBBB;
-
-    // int scale = _rcx->cfg.text_size = (_rcx->size.y/20/8);
-    int scale = _rcx->cfg.text_size = 1;
-    int x = 0, y = 1*8*scale;
-    for (LogNode *ln = state(env)->log; ln; ln = ln->prev) {
-      rcx_str_cursor(&x, &y, ln->data);
-      y += 8*scale;
-      x = 0;
-    }
-  }
 
   /* some net stats */
 #if 0
@@ -289,6 +284,7 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
   }
   _rcx->cfg.text_color = 0xFFFFFFFF;
 
+
   rcx_char(
     s->clnt.cam.x, // - s->clnt.cam.x,
     s->clnt.cam.y, // - s->clnt.cam.y,
@@ -303,6 +299,80 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
       e->y - s->clnt.cam.y,
       4, (you == e) ? 'u' : 'p'
     );
+  }
+
+  /* draw map */
+  {
+    char map[] = 
+      "wwwwwwwwwwwwwwwwwwwwwww\n"
+      "w....w.w|w.w|w.w|w....w\n"
+      "w.....................w\n"
+      "w....w|w.w|w.w|w.w....w\n"
+      "wwwwwwwwwwwwwwwwwwwwwww\n";
+
+    int cols = 0;
+    while (map[cols] && map[cols] != '\n') cols++;
+    cols++; /* newline */
+    int rows = sizeof(map) / cols;
+
+    int min_x = s->clnt.cam.x;
+    int max_x = s->clnt.cam.x + _rcx->size.x;
+    int min_y = s->clnt.cam.y;
+    int max_y = s->clnt.cam.y + _rcx->size.y;
+    for (int y = min_y; y < max_y; y++)
+      for (int x = min_x; x < max_x; x++) {
+        float tx =            (float)(x + 350.0f) / 90.0f;
+        float ty = rows - 1 - (float)(y +  50.0f) / 90.0f;
+        int i = (int)ty*cols + (int)tx;
+
+        if (tx < 0 || tx >= cols) continue;
+        if (ty < 0 || ty >= rows) continue;
+        if (map[i] == '.') continue;
+
+        uint32_t color = 0xFF0000FF;
+        if (map[i] == '|') {
+          float cx = fmodf((float)(x + 350.0f), 90.0f);
+          float cy = fmodf((float)(y +  50.0f), 90.0f);
+          if (mag(90.0f/2 - cx, 90.0f/2 - cy) < 15)
+            color = 0xFFFF00FF;
+          else
+            continue;
+        }
+
+        rcx_p(x - min_x, y - min_y, color);
+      }
+  }
+
+  /* log */
+  {
+    _rcx->cfg.text_color = 0xBBBBBBBB;
+
+    // int scale = _rcx->cfg.text_size = (_rcx->size.y/20/8);
+    int scale = _rcx->cfg.text_size = 1;
+    int x = 0, y = 1*8*scale;
+    for (LogNode *ln = state(env)->log; ln; ln = ln->prev) {
+      rcx_str_cursor(&x, &y, ln->data);
+      y += 8*scale;
+      x = 0;
+    }
+  }
+
+
+  /* display frame time */
+  {
+    s->frametime_ring_index = (s->frametime_ring_index + 1) % 256;
+    s->frametime_ring_buffer[s->frametime_ring_index] = env->ts() - start_ts;
+
+    double average = 0.0;
+    for (int i = 0; i < 256; i++) average += s->frametime_ring_buffer[i];
+    average /= 256.0;
+
+    char buf[16] = {0};
+    snprintf(buf, 16, "%.1fms", 1000*average);
+
+    int scale = 8*(_rcx->cfg.text_size = 1);
+    rcx_str(_rcx->size.x - scale*5,
+            _rcx->size.y - scale*1, buf);
   }
 }
 /* --- rcx --- */
@@ -344,7 +414,7 @@ typedef enum {
 
 typedef struct {
   ToClntMsgKind kind;
-  struct { int id; ClntEnt ent; } ent_upd;
+  struct { int id; uint32_t tick; ClntEnt ent; } ent_upd;
 } ToClntMsg;
 
 /* to host */
@@ -358,21 +428,24 @@ typedef struct {
   struct { float x, y; } move;
 } ToHostMsg;
 
-static void host_broadcast(Env *env) {
-  // log(env, "ding!");
-  //
+static void host_tick(Env *env) {
+  State *s = state(env);
+
+  uint32_t tick = s->host.tick_count++;
+
   for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = state(env)->host.clients + i;
+    Client *c = s->host.clients + i;
     if (!c->active) continue;
 
     /* apply Client velocity */
-    host_ent_get(env, c->pc)->x += c->vel.x * 6.0f * (20.0f/60.0f);
-    host_ent_get(env, c->pc)->y += c->vel.y * 6.0f * (20.0f/60.0f);
+    host_ent_get(env, c->pc)->x += c->vel.x * 6.0f;
+    host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
 
     ToClntMsg msg = {
       .kind = ToClntMsgKind_EntUpd,
       .ent_upd = {
         .id = 0,
+        .tick = tick,
         .ent = {
           .kind = EntKind_Thing, 
           .x = cosf(env->ts()) * 50,
@@ -390,6 +463,7 @@ static void host_broadcast(Env *env) {
         .kind = ToClntMsgKind_EntUpd,
         .ent_upd = {
           .id = i,
+          .tick = tick,
           .ent = {
             .kind = EntKind_Thing, 
             .you = c->pc == i,
@@ -413,10 +487,10 @@ static void host_poll(Env *env) {
     double dt = now - s->host.last;
     s->host.dt_acc += dt;
 
-    double FREQ = 1.0 / 60.0;
+    double FREQ = 1.0 / 20.0;
     while (s->host.dt_acc > FREQ)
       s->host.dt_acc -= FREQ,
-      host_broadcast(env);
+      host_tick(env);
   }
   s->host.last = now;
 }
@@ -465,8 +539,14 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
   ToClntMsg *msg = (ToClntMsg *)buf;
   if (msg->kind == ToClntMsgKind_Ping)
     log(env, "got host Ping!");
-  if (msg->kind == ToClntMsgKind_EntUpd)
-    s->clnt.ents[msg->ent_upd.id] = msg->ent_upd.ent;
+  if (msg->kind == ToClntMsgKind_EntUpd) {
+    uint32_t tick = msg->ent_upd.tick;
+
+    if (tick >= s->clnt.last_known_tick) {
+      s->clnt.last_known_tick = tick;
+      s->clnt.ents[msg->ent_upd.id] = msg->ent_upd.ent;
+    }
+  }
 }
 
 EXPORT void wq_update(Env *env) {
