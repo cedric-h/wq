@@ -111,6 +111,9 @@ typedef struct {
   /* returns time since bootup in seconds */
   double (*ts)(void);
 
+  void (*trace_begin)(char *str, size_t size);
+  void (*trace_end)(void);
+
 } Env;
 
 typedef struct {

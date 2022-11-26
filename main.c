@@ -3,7 +3,8 @@
 #define COBJMACROS
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#define VC_EXTRALEAN
+#include <Windows.h>
 #include <d3d11.h>
 
 #include <stdint.h>
@@ -32,6 +33,37 @@ static double env_ts(void) {
 	return (double)(tick - start) / (double)freq;
 }
 
+
+#ifdef TRACE
+  #define SPALL_IMPLEMENTATION
+  #include "spall.h"
+
+  // This is slow, if you can use RDTSC and set the multiplier in SpallInit, you'll have far better timing accuracy
+  double get_time_in_micros() {
+  	static double invfreq;
+  	if (!invfreq) {
+  		LARGE_INTEGER frequency;
+  		QueryPerformanceFrequency(&frequency);
+  		invfreq = 1000000.0 / frequency.QuadPart;
+  	}
+  	LARGE_INTEGER counter;
+  	QueryPerformanceCounter(&counter);
+  	return counter.QuadPart * invfreq;
+  }
+  static SpallProfile spall_ctx;
+  static SpallBuffer  spall_buffer;
+  
+  static void env_trace_begin(char *str, size_t size) {
+    SpallTraceBeginLenTidPid(&spall_ctx, &spall_buffer, str, size - 1, 0, 0, get_time_in_micros());
+  }
+  static void env_trace_end(void) {
+    SpallTraceEndTidPid(&spall_ctx, &spall_buffer, 0, 0, get_time_in_micros());
+  }
+#else
+  static void env_trace_begin(char *str, size_t size) {}
+  static void env_trace_end(void) {}
+#endif
+
 wq_DylibHook wq_lib = {0};
 /* X macro black magic isnt worth it */
 Env env = {
@@ -42,6 +74,9 @@ Env env = {
   .send         = env_send        ,
 
   .ts           = env_ts          ,
+
+  .trace_begin  = env_trace_begin ,
+  .trace_end    = env_trace_end   ,
 };
 
 static LRESULT WINAPI WindowProc(
@@ -64,15 +99,36 @@ static LRESULT WINAPI WindowProc(
     } return 0;
 
     case WM_KEYUP: {
-      wq_lib.wq_input(&env, HIWORD(lparam) & (KF_EXTENDED | 0xff), 0);
+      char vk = HIWORD(lparam) & (KF_EXTENDED | 0xff);
+#ifdef TRACE
+      if (vk == 1) {
+        SpallBufferQuit(&spall_ctx, &spall_buffer);
+        SpallQuit(&spall_ctx);
+        exit(0);
+      }
+#endif
+      wq_lib.wq_input(&env, vk, 0);
     } return 0;
   }
   return DefWindowProcW(wnd, msg, wparam, lparam);
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmdshow) {
-  WSADATA wsa_data;
-  WSAStartup(MAKEWORD(2, 2), &wsa_data);
+#ifdef TRACE
+  {
+    spall_ctx = SpallInit("simple_sample.spall", 1);
+
+    int BUFFER_SIZE = 1 * 1024 * 1024;
+    uint8_t *buffer = malloc(BUFFER_SIZE);
+    spall_buffer = (SpallBuffer){ .length = BUFFER_SIZE, .data = buffer };
+    SpallBufferInit(&spall_ctx, &spall_buffer);
+  }
+#endif
+
+  {
+    WSADATA wsa_data;
+    WSAStartup(MAKEWORD(2, 2), &wsa_data);
+  }
 
   WNDCLASSEXW wc =
   {

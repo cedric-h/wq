@@ -1,6 +1,9 @@
 // vim: sw=2 ts=2 expandtab smartindent
 #include <stdio.h>
 
+#define t_begin(str) env->trace_begin((str), sizeof(str))
+#define t_end() env->trace_end()
+
 #include "wq.h"
 #include "font.h"
 
@@ -228,6 +231,8 @@ static void rcx_str(int x, int y, char *str) {
 }
 
 EXPORT void wq_render(Env *env, PixelDesc *pd) {
+  t_begin(__FUNCTION__);
+
   double start_ts = env->ts();
 
   Rcx __rcx = { .pixels = pd->pixels, .stride = pd->stride, .raw_size = { pd->size.x, pd->size.y } };
@@ -240,13 +245,19 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     _rcx->size.y =  9 * scale;
   }
 
-  /* clear to black */
-  memset(pd->pixels, 0, pd->size.x * pd->size.y * sizeof(uint32_t));
+  {
+    t_begin("bg");
 
-  /* checkerboard */
-  for (int y = 0; y < _rcx->size.y; y++)
-    for (int x = 0; x < _rcx->size.x; x++)
-      rcx_p(x, y, (y/4%2 == x/4%2) ? 0x22222222 : 0x33333333);
+    /* clear to black */
+    memset(pd->pixels, 0, pd->size.x * pd->size.y * sizeof(uint32_t));
+
+    /* checkerboard */
+    for (int y = 0; y < _rcx->size.y; y++)
+      for (int x = 0; x < _rcx->size.x; x++)
+        rcx_p(x, y, (y/4%2 == x/4%2) ? 0x22222222 : 0x33333333);
+
+    t_end();
+  }
 
   /* some net stats */
 #if 0
@@ -268,41 +279,51 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
 
   /* --- we in world space now biatches --- */
 
-  State *s = state(env);
+  {
+    t_begin("ents");
 
-  /* a quest of self-discovery */
-  ClntEnt *you = NULL;
-  for (int i = 0; i < WQ_ENTS_MAX; i++) {
-    ClntEnt *e = s->clnt.ents + i;
-    if (e->you) { you = e; break; }
-  }
+    State *s = state(env);
 
-  /* move cam to you */
-  if (you) {
-    s->clnt.cam.x = lerp(s->clnt.cam.x, you->x - _rcx->size.x/2, 0.08f);
-    s->clnt.cam.y = lerp(s->clnt.cam.y, you->y - _rcx->size.y/2, 0.08f);
-  }
-  _rcx->cfg.text_color = 0xFFFFFFFF;
+    /* a quest of self-discovery */
+    ClntEnt *you = NULL;
+    for (int i = 0; i < WQ_ENTS_MAX; i++) {
+      ClntEnt *e = s->clnt.ents + i;
+      if (e->you) { you = e; break; }
+    }
 
+    /* move cam to you */
+    if (you) {
+      s->clnt.cam.x = lerp(s->clnt.cam.x, you->x - _rcx->size.x/2, 0.08f);
+      s->clnt.cam.y = lerp(s->clnt.cam.y, you->y - _rcx->size.y/2, 0.08f);
+    }
+    _rcx->cfg.text_color = 0xFFFFFFFF;
 
-  rcx_char(
-    s->clnt.cam.x, // - s->clnt.cam.x,
-    s->clnt.cam.y, // - s->clnt.cam.y,
-    4, 'c'
-  );
-
-  for (int i = 0; i < WQ_ENTS_MAX; i++) {
-    ClntEnt *e = s->clnt.ents + i;
 
     rcx_char(
-      e->x - s->clnt.cam.x,
-      e->y - s->clnt.cam.y,
-      4, (you == e) ? 'u' : 'p'
+      s->clnt.cam.x, // - s->clnt.cam.x,
+      s->clnt.cam.y, // - s->clnt.cam.y,
+      4, 'c'
     );
+
+    for (int i = 0; i < WQ_ENTS_MAX; i++) {
+      ClntEnt *e = s->clnt.ents + i;
+      if (e->kind == EntKind_Empty) continue;
+
+      rcx_char(
+        e->x - s->clnt.cam.x,
+        e->y - s->clnt.cam.y,
+        4, (you == e) ? 'u' : 'p'
+      );
+    }
+
+    t_end();
   }
 
   /* draw map */
   {
+    t_begin("map");
+    State *s = state(env);
+
     char map[] = 
       "wwwwwwwwwwwwwwwwwwwwwww\n"
       "w....w.w|w.w|w.w|w....w\n"
@@ -341,10 +362,13 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
 
         rcx_p(x - min_x, y - min_y, color);
       }
+
+    t_end();
   }
 
   /* log */
   {
+    t_begin("log");
     _rcx->cfg.text_color = 0xBBBBBBBB;
 
     // int scale = _rcx->cfg.text_size = (_rcx->size.y/20/8);
@@ -355,11 +379,16 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
       y += 8*scale;
       x = 0;
     }
+
+    t_end();
   }
 
 
   /* display frame time */
   {
+    State *s = state(env);
+
+    t_begin("frametime counter");
     s->frametime_ring_index = (s->frametime_ring_index + 1) % 256;
     s->frametime_ring_buffer[s->frametime_ring_index] = env->ts() - start_ts;
 
@@ -373,7 +402,11 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     int scale = 8*(_rcx->cfg.text_size = 1);
     rcx_str(_rcx->size.x - scale*5,
             _rcx->size.y - scale*1, buf);
+
+    t_end();
   }
+
+  t_end();
 }
 /* --- rcx --- */
 
