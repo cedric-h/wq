@@ -22,15 +22,15 @@ void *calloc(size_t nmemb, size_t size);
 #define MATH_PI  3.141592653589793
 #define MATH_TAU 6.283185307179586
 
-static float lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
+static float inline lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
+static float inline fabsf(float f) { return f < 0 ? -f : f; }
 #ifdef CUSTOM_MATH
-static float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
-static float fabsf(float f) { return f < 0 ? -f : f; }
-static float signf(float f) { return f < 0 ? -1 : 1; }
+static inline float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
+static inline float signf(float f) { return f < 0 ? -1 : 1; }
 
 // Remez' algorithm approximation
 // https://stackoverflow.com/questions/23837916/a-faster-but-less-accurate-fsin-for-intel-asm
-static float sinf(float _x) {
+static inline float sinf(float _x) {
   float x = fmodf(fabsf(_x), MATH_TAU) - MATH_PI;
   if (_x > 0) x = -x;
 
@@ -41,11 +41,11 @@ static float sinf(float _x) {
           xx * -1.49414020045938777495e-4f));
   return s;
 }
-static float cosf(float x) {
+static inline float cosf(float x) {
   return sinf(x + MATH_PI/2);
 }
 
-static float sqrtf(float z) {
+static inline float sqrtf(float z) {
 	union { float f; uint32_t i; } val = {z};	/* Convert type, preserving bit pattern */
 	val.i -= 1 << 23;	/* Subtract 2^m. */
 	val.i >>= 1;		/* Divide by 2. */
@@ -58,8 +58,8 @@ static float sqrtf(float z) {
 #endif
 
 /* vector fns (only things that don't generalize to N=1) */
-static float mag(float x, float y) { return sqrtf(x*x + y*y); }
-static void norm(float *x, float *y) {
+static inline float mag(float x, float y) { return sqrtf(x*x + y*y); }
+static inline void norm(float *x, float *y) {
   float m = mag(*x, *y);
   if (m > 0.0f)
     *x /= m,
@@ -72,6 +72,9 @@ static void log(Env *e, char *p);
 
 
 /* --- map --- */
+#define map_tile_world_size (90)
+#define map_world_offset_x (150)
+#define map_world_offset_y (200)
 char map[] = 
   "wwwwwwwwwwwwwwwwwwwwwww\n"
   "w....w.w|w.w|w.w|w....w\n"
@@ -90,15 +93,20 @@ static inline int map_rows(void) { return sizeof(map) / map_cols(); }
 
 static inline int map_flip_y(int y) { return map_rows() - 1 - y; }
 
-static inline int map_x_from_world(float x) { return            (x + 150.0f) / 90.0f ; }
-static inline int map_y_from_world(float y) { return map_flip_y((y +  50.0f) / 90.0f); }
+static inline int map_x_from_world(float x) { return            (x + map_world_offset_x) / map_tile_world_size ; }
+static inline int map_y_from_world(float y) { return map_flip_y((y + map_world_offset_y) / map_tile_world_size); }
 
-static inline float map_x_to_world(float x) { return            x *90.0f - 150.0f; }
-static inline float map_y_to_world(float y) { return map_flip_y(y)*90.0f -  50.0f; }
+static inline float map_x_to_world(float x) { return            x *map_tile_world_size - map_world_offset_x; }
+static inline float map_y_to_world(float y) { return map_flip_y(y)*map_tile_world_size - map_world_offset_y; }
 
 /* in domain 0..1 */
 
 static inline char map_index(int mx, int my) { return map[my*map_cols() + mx]; }
+static inline int map_in_bounds(int mx, int my) {
+  if (mx < 0 || mx >= map_cols()) return 0;
+  if (my < 0 || my >= map_rows()) return 0;
+  return 1;
+}
 /* --- map --- */
 
 
@@ -148,7 +156,7 @@ typedef struct {
   /* --- dbg --- */
   LogNode *log;
   double frametime_ring_buffer[256];
-  int frametime_ring_index;
+  int frametime_ring_index, frametime_ring_len;
   /* --- dbg --- */
 
   struct {
@@ -248,10 +256,12 @@ static void rcx_char(int px, int py, int scale, char c) {
 }
 
 static void rcx_str_cursor(int *x, int *y, char *str) {
+  int start = *x;
   int scale = _rcx->cfg.text_size;
   for (; *str; *str++) {
     if (*str == '\n')
-      *y += 8*scale;
+      *y -= 8*scale,
+      *x = start;
     else
       rcx_char(*x += 8*scale, *y, scale, *str);
   }
@@ -329,13 +339,6 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     }
     _rcx->cfg.text_color = 0xFFFFFFFF;
 
-
-    rcx_char(
-      s->clnt.cam.x, // - s->clnt.cam.x,
-      s->clnt.cam.y, // - s->clnt.cam.y,
-      4, 'c'
-    );
-
     for (int i = 0; i < WQ_ENTS_MAX; i++) {
       ClntEnt *e = s->clnt.ents + i;
       if (e->kind == EntKind_Empty) continue;
@@ -365,14 +368,13 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
         int tx = map_x_from_world(x);
         int ty = map_y_from_world(y);
 
-        if (tx < 0 || tx >= map_cols()) continue;
-        if (ty < 0 || ty >= map_rows()) continue;
+        if (!map_in_bounds(tx, ty)) continue;
         if (map_index(tx, ty) == '.') continue;
 
         uint32_t color = 0xFF0000FF;
         if (map_index(tx, ty) == '|') {
-          float cx = fabsf((x - map_x_to_world(tx)) / 90.0f);
-          float cy = fabsf((y - map_y_to_world(ty)) / 90.0f);
+          float cx = fabsf((x - map_x_to_world(tx)) / map_tile_world_size);
+          float cy = fabsf((y - map_y_to_world(ty)) / map_tile_world_size);
 
           if (mag(0.5f - cx, 0.5f - cy) < 0.20f)
             color = 0xFFFF00FF;
@@ -410,14 +412,15 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
 
     t_begin("frametime counter");
     s->frametime_ring_index = (s->frametime_ring_index + 1) % 256;
+    s->frametime_ring_len += s->frametime_ring_len < 256;
     s->frametime_ring_buffer[s->frametime_ring_index] = env->ts() - start_ts;
 
     double average = 0.0;
     for (int i = 0; i < 256; i++) average += s->frametime_ring_buffer[i];
-    average /= 256.0;
+    average /= s->frametime_ring_len;
 
     char buf[16] = {0};
-    snprintf(buf, 16, "%.1fms", 1000*average);
+    snprintf(buf, 16, "%.1fms\n%dx%d", 1000*average, _rcx->size.x, _rcx->size.y);
 
     int scale = 8*(_rcx->cfg.text_size = 1);
     rcx_str(_rcx->size.x - scale*5,
@@ -481,6 +484,73 @@ typedef struct {
   struct { float x, y; } move;
 } ToHostMsg;
 
+static void host_ent_tile_collision(Env *env, HostEnt *e) {
+  /* 4 is scale, 8 is base letter size, 2 for center */
+  float e_size = (4*8/2);
+  float ex = e->x + e_size;
+  float ey = e->y + e_size;
+
+  // int tx = map_x_from_world(ex);
+  // int ty = map_y_from_world(ey);
+  // if (map_in_bounds(tx, ty) && map_index(tx, ty) == '.') return;
+
+  struct { int x, y; } offsets[] = {
+    { 0, 0},
+    { 1, 0},
+    {-1, 0},
+    { 0, 1},
+    { 0,-1},
+    { 1, 1},
+    {-1, 1},
+    {-1,-1},
+    { 1,-1},
+  };
+
+  int empty_tx = -1, empty_ty = -1;
+
+  float best_dist = 1e9;
+  for (int i = 0; i < sizeof(offsets)/sizeof(offsets[0]); i++) {
+
+    /* are you in a solid tile? */
+    int tx = map_x_from_world(ex) + offsets[i].x;
+    int ty = map_y_from_world(ey) + offsets[i].y;
+    if (!map_in_bounds(tx, ty)) continue;
+    if (map_index(tx, ty) != '.') continue;
+
+    /* find center of tile */
+    int cx = map_x_to_world(tx) + map_tile_world_size/2;
+    int cy = map_y_to_world(ty) + map_tile_world_size/2;
+
+    /* from center to Ent */
+    float dx = ex - cx;
+    float dy = ey - cy;
+
+    float dist = mag(dx, dy);
+
+    if (dist < best_dist) {
+      best_dist = dist;
+      empty_tx = tx;
+      empty_ty = ty;
+    }
+  }
+
+  if (!map_in_bounds(empty_tx, empty_ty))
+    e->x = e->y = 0.0f;
+  else {
+    /* find center of tile */
+    int cx = map_x_to_world(empty_tx) + map_tile_world_size/2;
+    int cy = map_y_to_world(empty_ty) + map_tile_world_size/2;
+
+    /* unit vector from center to Ent */
+    float dx = ex - cx;
+    float dy = ey - cy;
+
+    float he =  map_tile_world_size/2;
+    if (fabsf(dx) > he) e->x = cx + he * signf(dx) - e_size;
+    if (fabsf(dy) > he) e->y = cy + he * signf(dy) - e_size;
+  }
+}
+
 static void host_tick(Env *env) {
   State *s = state(env);
 
@@ -493,6 +563,7 @@ static void host_tick(Env *env) {
     /* apply Client velocity */
     host_ent_get(env, c->pc)->x += c->vel.x * 6.0f;
     host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
+    host_ent_tile_collision(env, host_ent_get(env, c->pc));
 
     ToClntMsg msg = {
       .kind = ToClntMsgKind_EntUpd,
