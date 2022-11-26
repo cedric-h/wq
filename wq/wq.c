@@ -71,6 +71,37 @@ static void norm(float *x, float *y) {
 static void log(Env *e, char *p);
 
 
+/* --- map --- */
+char map[] = 
+  "wwwwwwwwwwwwwwwwwwwwwww\n"
+  "w....w.w|w.w|w.w|w....w\n"
+  "w.....................w\n"
+  "w....w|w.w|w.w|w.w....w\n"
+  "wwwwwwwwwwwwwwwwwwwwwww\n";
+
+static int map_cols(void) {
+  return sizeof("wwwwwwwwwwwwwwwwwwwwwww");
+
+  // int cols = 0;
+  // while (map[cols] && map[cols] != '\n') cols++;
+  // return cols + 1; /* newline */
+}
+static inline int map_rows(void) { return sizeof(map) / map_cols(); }
+
+static inline int map_flip_y(int y) { return map_rows() - 1 - y; }
+
+static inline int map_x_from_world(float x) { return            (x + 150.0f) / 90.0f ; }
+static inline int map_y_from_world(float y) { return map_flip_y((y +  50.0f) / 90.0f); }
+
+static inline float map_x_to_world(float x) { return            x *90.0f - 150.0f; }
+static inline float map_y_to_world(float y) { return map_flip_y(y)*90.0f -  50.0f; }
+
+/* in domain 0..1 */
+
+static inline char map_index(int mx, int my) { return map[my*map_cols() + mx]; }
+/* --- map --- */
+
+
 /* --- persistent State layout --- */
 typedef uint32_t EntId;
 typedef struct {
@@ -324,17 +355,6 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     t_begin("map");
     State *s = state(env);
 
-    char map[] = 
-      "wwwwwwwwwwwwwwwwwwwwwww\n"
-      "w....w.w|w.w|w.w|w....w\n"
-      "w.....................w\n"
-      "w....w|w.w|w.w|w.w....w\n"
-      "wwwwwwwwwwwwwwwwwwwwwww\n";
-
-    int cols = 0;
-    while (map[cols] && map[cols] != '\n') cols++;
-    cols++; /* newline */
-    int rows = sizeof(map) / cols;
 
     int min_x = s->clnt.cam.x;
     int max_x = s->clnt.cam.x + _rcx->size.x;
@@ -342,19 +362,19 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     int max_y = s->clnt.cam.y + _rcx->size.y;
     for (int y = min_y; y < max_y; y++)
       for (int x = min_x; x < max_x; x++) {
-        float tx =            (float)(x + 350.0f) / 90.0f;
-        float ty = rows - 1 - (float)(y +  50.0f) / 90.0f;
-        int i = (int)ty*cols + (int)tx;
+        int tx = map_x_from_world(x);
+        int ty = map_y_from_world(y);
 
-        if (tx < 0 || tx >= cols) continue;
-        if (ty < 0 || ty >= rows) continue;
-        if (map[i] == '.') continue;
+        if (tx < 0 || tx >= map_cols()) continue;
+        if (ty < 0 || ty >= map_rows()) continue;
+        if (map_index(tx, ty) == '.') continue;
 
         uint32_t color = 0xFF0000FF;
-        if (map[i] == '|') {
-          float cx = fmodf((float)(x + 350.0f), 90.0f);
-          float cy = fmodf((float)(y +  50.0f), 90.0f);
-          if (mag(90.0f/2 - cx, 90.0f/2 - cy) < 15)
+        if (map_index(tx, ty) == '|') {
+          float cx = fabsf((x - map_x_to_world(tx)) / 90.0f);
+          float cy = fabsf((y - map_y_to_world(ty)) / 90.0f);
+
+          if (mag(0.5f - cx, 0.5f - cy) < 0.20f)
             color = 0xFFFF00FF;
           else
             continue;
