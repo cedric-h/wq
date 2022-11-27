@@ -15,14 +15,21 @@
 void *malloc(size_t size);
 void free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
-/* TODO: write our own allocator for LogNode * ... maybe just a ring buffer of chars? */ 
+/* TODO: write our own allocator for LogNode *
+ * ... maybe just a ring buffer of chars?
+ *
+ * thought about this some more (too much), conclusion:
+ * ring buffer of message struct containing 100 chars and ts */ 
 
 /* rolling our own math makes it easier to smol WASM, :> */
 
 #define MATH_PI  3.141592653589793
 #define MATH_TAU 6.283185307179586
 
+static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
+
 static float inline lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
+static float inline inv_lerp(float min, float max, float p) { return (p - min) / (max - min); }
 static float inline fabsf(float f) { return f < 0 ? -f : f; }
 #ifdef CUSTOM_MATH
 static inline float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
@@ -123,13 +130,18 @@ typedef struct {
 #define CLIENTS_MAX (1 << 8)
 
 typedef struct LogNode LogNode;
-struct LogNode {
+typedef struct {
   LogNode *prev;
+  double ts;
+} LogNodeHeader;
+struct LogNode {
+  LogNodeHeader header;
   char data[];
 };
 
 typedef enum {
   EntKind_Empty,
+  EntKind_Limbo,
   EntKind_Player,
   EntKind_Fireball,
 } EntKind;
@@ -145,6 +157,10 @@ typedef struct {
   float x, y;
 } ClntEnt;
 
+typedef struct {
+  uint32_t fb_hit_ticks[10];
+} TutorialState;
+
 /* client ents are basically just a networking abstraction
  * to track a moving thing and maybe make it look good
  *
@@ -156,6 +172,7 @@ typedef struct {
 typedef struct {
   /* --- dbg --- */
   LogNode *log;
+  int log_open;
   double frametime_ring_buffer[256];
   int frametime_ring_index, frametime_ring_len;
   /* --- dbg --- */
@@ -178,6 +195,8 @@ typedef struct {
 
     HostEnt ents[WQ_ENTS_MAX];
     int next_ent;
+
+    TutorialState tutorial;
   } host;
 
 } State;
@@ -204,12 +223,13 @@ static void log(Env *env, char *p) {
   int len = strlen(p);
 
   /* maintain linked list */
-  LogNode *ln = calloc(sizeof(LogNode *) + len, 1);
-  ln->prev = state(env)->log;
+  LogNode *ln = calloc(sizeof(LogNodeHeader) + len, 1);
+  ln->header.prev = state(env)->log;
+  ln->header.ts = env->ts();
   state(env)->log = ln;
 
-  /* copy in payload */
-  memcpy((uint8_t *)ln + sizeof(LogNode *), p, len);
+  /* copy in payload after header */
+  memcpy((uint8_t *)ln + sizeof(LogNodeHeader), p, len);
 }
 /* --- log --- */
 
@@ -223,12 +243,32 @@ typedef struct {
   struct {
     int text_size;
     uint32_t text_color;
+    float alpha;
+    float mat[4];
+    struct { float x, y; } origin;
   } cfg;
 } Rcx;
+
+static uint32_t rcx_color(int r, int g, int b) {
+  return (r << 0) & 0x000000FF |
+         (g << 4) & 0x0000FF00 |
+         (b << 8) & 0x00FF0000 ;
+}
+static uint32_t rcx_decompose(uint32_t c, int *r, int *g, int *b) {
+  *r = (c & 0x000000FF) >> 0;
+  *g = (c & 0x0000FF00) >> 4;
+  *b = (c & 0x00FF0000) >> 8;
+}
 
 /* plot pixel */
 Rcx *_rcx = 0;
 static void rcx_p(int x, int y, uint32_t p) {
+  float _x = x,
+        _y = y;
+  x = _rcx->cfg.mat[0]*_x + _rcx->cfg.mat[2]*_y - _rcx->cfg.origin.x;
+  y = _rcx->cfg.mat[1]*_x + _rcx->cfg.mat[3]*_y - _rcx->cfg.origin.y;
+
+
   /* put it on the centered, 16:9 "canvas" */
   x += (_rcx->raw_size.x - _rcx->size.x)/2;
   y += (_rcx->raw_size.y - _rcx->size.y)/2;
@@ -236,10 +276,22 @@ static void rcx_p(int x, int y, uint32_t p) {
   if (x < 0 || x >= _rcx->raw_size.x) return;
   if (y < 0 || y >= _rcx->raw_size.y) return;
 
-  /* y is up, motherfucker */
+  /* y is up, yall */
   y = _rcx->raw_size.y - y - 1;
 
-  _rcx->pixels[y*_rcx->stride + x] = p;
+  int i = y*_rcx->stride + x;
+  if (_rcx->cfg.alpha < 1.0f) {
+    int r0, g0, b0, r1, g1, b1;
+    rcx_decompose(_rcx->pixels[i], &r0, &g0, &b0);
+    rcx_decompose(              p, &r1, &g1, &b1);
+
+    _rcx->pixels[i] = rcx_color(
+      lerp(r0, r1, _rcx->cfg.alpha),
+      lerp(g0, g1, _rcx->cfg.alpha),
+      lerp(b0, b1, _rcx->cfg.alpha)
+    );
+  } else
+    _rcx->pixels[i] = p;
 }
 
 /* x, y in domain 0..8, c is char */
@@ -280,6 +332,10 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
   Rcx __rcx = { .pixels = pd->pixels, .stride = pd->stride, .raw_size = { pd->size.x, pd->size.y } };
   _rcx = &__rcx;
 
+  /* you probably want this to be an identity matrix */
+  memcpy(_rcx->cfg.mat, (float []) { 1, 0, 0, 1 }, sizeof(float[4]));
+  _rcx->cfg.alpha = 1;
+
   /* what's the biggest we can be and preserve 16x9? */
   {
     float scale = (pd->size.x/16.f < pd->size.y/9.f) ? pd->size.x/16.f : pd->size.y/9.f;
@@ -319,7 +375,61 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
   }
 #endif
 
-  /* --- we in world space now biatches --- */
+  /* --- world space? --- */
+
+  {
+    State *s = state(env);
+
+    _rcx->cfg.origin.x = s->clnt.cam.x;
+    _rcx->cfg.origin.y = s->clnt.cam.y;
+
+    double t = fmodf(env->ts(), 1.0f);
+
+    double r = t * MATH_TAU;
+    memcpy(_rcx->cfg.mat, (float []) {
+       cosf(r), sinf(r),
+      -sinf(r), cosf(r)
+    }, sizeof(float[4]));
+
+    _rcx->cfg.text_color = 0xFFFFFFFF;
+    rcx_char(
+       0.0f - 5*8/2,
+       0.0f - 5*8/2,
+      5, '!'
+    );
+    memcpy(_rcx->cfg.mat, (float []) { 1, 0, 0, 1 }, sizeof(float[4]));
+
+    _rcx->cfg.origin.x = 0.0f;
+    _rcx->cfg.origin.y = 0.0f;
+
+#if 0
+    typedef enum {
+      KeyFrame_Rotates = (1 << 0),
+      KeyFrame_Moves   = (1 << 1),
+      KeyFrame_Damages = (1 << 2),
+    } KeyFrame_Flag;
+    typedef struct {
+      float duration;
+      KeyFrame_Flag flags;
+      float rot;
+      float x, y;
+    } KeyFrame;
+
+    KeyFrame keys = {
+      {0.2174f,              KF_Rotates | KF_Moves, rot-swing * 1.f, },
+      {0.2304f,              KF_Rotates           , rot-swing * 2.f, },
+      {0.0870f, KF_Damages | KF_Rotates           , rot+swing * 2.f, },
+      {0.2478f,              KF_Rotates           , rot+swing * 3.f, },
+      {0.2174f,              KF_Rotates | KF_Moves,        rest_rot, },
+    }
+    int hand = 0;
+    int rest = sizeof(keys)/sizeof(keys[0]) - 1;
+    kf[hand].x = 0.0f;
+    kf[hand].y = 0.0f;
+    kf[rest].x = 0.0f;
+    kf[rest].y = 0.0f;
+#endif
+  }
 
   {
     t_begin("ents");
@@ -401,11 +511,26 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     // int scale = _rcx->cfg.text_size = (_rcx->size.y/20/8);
     int scale = _rcx->cfg.text_size = 1;
     int x = 0, y = 1*8*scale;
-    for (LogNode *ln = state(env)->log; ln; ln = ln->prev) {
+    int i = 0;
+    for (LogNode *ln = state(env)->log; ln; ln = ln->header.prev) {
+      if (!state(env)->log_open) {
+        _rcx->cfg.alpha = 3 - (env->ts() - ln->header.ts);
+        _rcx->cfg.alpha /= 3;
+        if (_rcx->cfg.alpha < 0) _rcx->cfg.alpha = 0;
+        _rcx->cfg.alpha = ease_out_quad(_rcx->cfg.alpha);
+
+        float max = 6;
+        if (i < max) _rcx->cfg.alpha += ease_out_quad(1.0f - (float)i/max);
+        if (_rcx->cfg.alpha > 1) _rcx->cfg.alpha = 1;
+      }
+
       rcx_str_cursor(&x, &y, ln->data);
       y += 8*scale;
       x = 0;
+
+      i++;
     }
+    _rcx->cfg.alpha = 1;
 
     t_end();
   }
@@ -489,7 +614,26 @@ typedef struct {
   struct { float x, y; } move;
 } ToHostMsg;
 
-static void host_ent_tile_collision(Env *env, HostEnt *e) {
+static int host_ent_ent_collision(Env *env, HostEnt *p, EntId *out) {
+
+  /* quadratic perf goes weeee */
+  for (int i = 0; i < WQ_ENTS_MAX; i++) {
+    HostEnt *e = state(env)->host.ents + i;
+    if (e->kind == EntKind_Empty) continue;
+    if (e == p) continue;
+
+    float dx = e->x - p->x;
+    float dy = e->y - p->y;
+    if (mag(dx, dy) < 8*4) {
+      *out = i;
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+static int host_ent_tile_collision(Env *env, HostEnt *e) {
   float ex = e->x;
   float ey = e->y;
 
@@ -509,8 +653,8 @@ static void host_ent_tile_collision(Env *env, HostEnt *e) {
     { 1,-1},
   };
 
+  /* find closest empty tile */
   int empty_tx = -1, empty_ty = -1;
-
   float best_dist = 1e9;
   for (int i = 0; i < sizeof(offsets)/sizeof(offsets[0]); i++) {
 
@@ -518,7 +662,7 @@ static void host_ent_tile_collision(Env *env, HostEnt *e) {
     int tx = map_x_from_world(ex) + offsets[i].x;
     int ty = map_y_from_world(ey) + offsets[i].y;
     if (!map_in_bounds(tx, ty)) continue;
-    if (map_index(tx, ty) != '.') continue;
+    if (map_index(tx, ty) == 'w') continue;
 
     /* find center of tile */
     int cx = map_x_to_world(tx) + map_tile_world_size/2;
@@ -548,9 +692,11 @@ static void host_ent_tile_collision(Env *env, HostEnt *e) {
     float dx = ex - cx;
     float dy = ey - cy;
 
+    int hit = 0;
     float he =  map_tile_world_size/2;
-    if (fabsf(dx) > he) e->x = cx + he * signf(dx);
-    if (fabsf(dy) > he) e->y = cy + he * signf(dy);
+    if (fabsf(dx) > he) hit = 1, e->x = cx + he * signf(dx);
+    if (fabsf(dy) > he) hit = 1, e->y = cy + he * signf(dy);
+    return hit;
   }
 }
 
@@ -560,13 +706,19 @@ static void host_ent_tile_collision(Env *env, HostEnt *e) {
 static void host_tick(Env *env) {
   State *s = state(env);
 
-  double sec = (double)s->host.tick_count / (double)TICK_SECOND;
-  uint32_t tick = s->host.tick_count++;
-  ToClntMsg msg = {
-    .kind = ToClntMsgKind_EntUpd,
-    .ent_upd = { .tick = tick }
+  uint32_t tick = s->host.tick_count;
+  double sec = (double)tick / (double)TICK_SECOND;
+
+  int scratch_id = 0;
+
+  /* lil lost spinny dude */
+  *host_ent_get(env, scratch_id++) = (HostEnt) {
+    .kind = EntKind_Player, 
+    .x = cosf(env->ts()) * 50,
+    .y = sinf(env->ts()) * 50,
   };
 
+  /* move players */
   for (int i = 0; i < CLIENTS_MAX; i++) {
     Client *c = s->host.clients + i;
     if (!c->active) continue;
@@ -575,46 +727,77 @@ static void host_tick(Env *env) {
     host_ent_get(env, c->pc)->x += c->vel.x * 6.0f;
     host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
     host_ent_tile_collision(env, host_ent_get(env, c->pc));
+  }
 
-    int scratch_id = 0;
+  int shooter_min_x = 1e9, shooter_max_x = 0;
+  for (int ty = 0; ty < map_rows(); ty++)
+    for (int tx = 0; tx < map_cols(); tx++) {
+      if (map_index(tx, ty) != '|') continue;
 
-    /* lil lost spinny dude */
-    msg.ent_upd.id = scratch_id++;
-    msg.ent_upd.ent = (ClntEnt) {
-      .kind = EntKind_Player, 
-      .x = cosf(env->ts()) * 50,
-      .y = sinf(env->ts()) * 50,
-    };
-    env->send(&c->addr, (void *)&msg, sizeof(msg));
+      if (tx < shooter_min_x) shooter_min_x = tx;
+      if (tx > shooter_max_x) shooter_max_x = tx;
+    }
 
-    /* trap bullets */
-    for (int ty = 0; ty < map_rows(); ty++)
-      for (int tx = 0; tx < map_cols(); tx++) {
-        if (map_index(tx, ty) != '|') continue;
+  /* tutorial bullets */
+  TutorialState *ts = &s->host.tutorial;
+  int fb_i = 0;
+  for (int ty = 0; ty < map_rows(); ty++)
+    for (int tx = 0; tx < map_cols(); tx++) {
+      if (map_index(tx, ty) != '|') continue;
 
-        /* origin is center of the tile */
-        float ox = map_x_to_world(tx) + map_tile_world_size/2;
-        float oy = map_y_to_world(ty) + map_tile_world_size/2;
+      /* origin is center of the tile */
+      float ox = map_x_to_world(tx) + map_tile_world_size/2;
+      float oy = map_y_to_world(ty) + map_tile_world_size/2;
 
-        /* shoot towards row 2 on Y axis */
-        float dx = ox - (map_x_to_world(tx) + map_tile_world_size/2);
-        float dy = oy - (map_y_to_world( 2) + map_tile_world_size/2);
-        norm(&dx, &dy);
-        dx *= 2.5f * map_tile_world_size + 8*4/2;
-        dy *= 2.5f * map_tile_world_size + 8*4/2;
+      /* shoot towards row 2 on Y axis */
+      float dx = (map_x_to_world(tx) + map_tile_world_size/2) - ox;
+      float dy = (map_y_to_world( 2) + map_tile_world_size/2) - oy;
+      norm(&dx, &dy);
+      dx *= 3.0f * map_tile_world_size;
+      dy *= 3.0f * map_tile_world_size;
 
-        /* how far along is bullet on its journey? */
-        float t = fmodf(-sec / 3.0f, 1.0f);
+      /* how far along is bullet on its journey? */
+      float difficulty = inv_lerp(shooter_min_x, shooter_max_x, tx);
+      double cycle = sec / lerp(1.0f, 0.8f, difficulty);
+      float t = fmodf(cycle, 1.0f);
 
-        msg.ent_upd.id = scratch_id++;
-        msg.ent_upd.ent = (ClntEnt) {
-          .kind = EntKind_Fireball, 
-          .x = ox + t*dx,
-          .y = oy + t*dy,
-        };
-        env->send(&c->addr, (void *)&msg, sizeof(msg));
+      /* yeet it into enthood */
+      HostEnt *fb = host_ent_get(env, scratch_id++);
+      *fb = (HostEnt) {
+        .kind = EntKind_Limbo,
+        .x = ox + t*dx,
+        .y = oy + t*dy,
+      };
+
+      int alive = ts->fb_hit_ticks[fb_i] != (int)cycle;
+      if (alive) {
+        fb->kind = EntKind_Fireball;
+
+        /* hit tile = ded */
+        if (host_ent_tile_collision(env, fb))
+          ts->fb_hit_ticks[fb_i] = (int)cycle;
+
+        EntId hit_id = -1;
+        while (host_ent_ent_collision(env, fb, &hit_id)) {
+          ts->fb_hit_ticks[fb_i] = (int)cycle;
+
+          HostEnt *hit = host_ent_get(env, hit_id);
+          if (hit->kind == EntKind_Player)
+            hit->x = hit->y = 0.0f;
+        }
       }
 
+      fb_i++;
+    }
+
+  ToClntMsg msg = {
+    .kind = ToClntMsgKind_EntUpd,
+    .ent_upd = { .tick = tick }
+  };
+
+  for (int i = 0; i < CLIENTS_MAX; i++) {
+    Client *c = s->host.clients + i;
+    if (!c->active) continue;
     for (int i = 0; i < WQ_ENTS_MAX; i++) {
       HostEnt *e = state(env)->host.ents + i;
       if (e->kind == EntKind_Empty) continue;
@@ -626,9 +809,15 @@ static void host_tick(Env *env) {
         .x = e->x,
         .y = e->y,
       };
+
+      if (e->kind == EntKind_Limbo)
+        msg.ent_upd.ent.kind = EntKind_Empty;
+
       env->send(&c->addr, (void *)&msg, sizeof(msg));
     }
   }
+
+  s->host.tick_count++;
 }
 
 /* broadcast if it's time to */
@@ -771,7 +960,7 @@ EXPORT void wq_input(Env *env, char c, int down) {
     state(env);
   }
 
-  if (c == WqVk_Tilde) log(env, "Tilde");
+  if (c == WqVk_Tilde) s->log_open = down;
 
   s->clnt.keysdown[c] = down;
 
