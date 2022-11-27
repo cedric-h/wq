@@ -130,7 +130,8 @@ struct LogNode {
 
 typedef enum {
   EntKind_Empty,
-  EntKind_Thing,
+  EntKind_Player,
+  EntKind_Fireball,
 } EntKind;
 
 typedef struct {
@@ -189,7 +190,7 @@ static State *state(Env *env) {
     /* --- init state --- */
     for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
 
-    state(env)->host.next_ent++; /* i need one for my mad hax */
+    state(env)->host.next_ent += 25; /* i need some scratch ents for my mad hax */
     log(env, "sup nerd");
     /* --- init state --- */
   }
@@ -343,10 +344,14 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
       ClntEnt *e = s->clnt.ents + i;
       if (e->kind == EntKind_Empty) continue;
 
+      char c = '?';
+      if (e->kind == EntKind_Player)   c = (you == e) ? 'u' : 'p';
+      if (e->kind == EntKind_Fireball) c = 'o';
+
       rcx_char(
-        e->x - s->clnt.cam.x,
-        e->y - s->clnt.cam.y,
-        4, (you == e) ? 'u' : 'p'
+        e->x - s->clnt.cam.x - 4*8/2,
+        e->y - s->clnt.cam.y - 4*8/2,
+        4, c
       );
     }
 
@@ -485,10 +490,8 @@ typedef struct {
 } ToHostMsg;
 
 static void host_ent_tile_collision(Env *env, HostEnt *e) {
-  /* 4 is scale, 8 is base letter size, 2 for center */
-  float e_size = (4*8/2);
-  float ex = e->x + e_size;
-  float ey = e->y + e_size;
+  float ex = e->x;
+  float ey = e->y;
 
   // int tx = map_x_from_world(ex);
   // int ty = map_y_from_world(ey);
@@ -546,15 +549,23 @@ static void host_ent_tile_collision(Env *env, HostEnt *e) {
     float dy = ey - cy;
 
     float he =  map_tile_world_size/2;
-    if (fabsf(dx) > he) e->x = cx + he * signf(dx) - e_size;
-    if (fabsf(dy) > he) e->y = cy + he * signf(dy) - e_size;
+    if (fabsf(dx) > he) e->x = cx + he * signf(dx);
+    if (fabsf(dy) > he) e->y = cy + he * signf(dy);
   }
 }
+
+/* how many ticks in a second? */
+#define TICK_SECOND (20)
 
 static void host_tick(Env *env) {
   State *s = state(env);
 
+  double sec = (double)s->host.tick_count / (double)TICK_SECOND;
   uint32_t tick = s->host.tick_count++;
+  ToClntMsg msg = {
+    .kind = ToClntMsgKind_EntUpd,
+    .ent_upd = { .tick = tick }
+  };
 
   for (int i = 0; i < CLIENTS_MAX; i++) {
     Client *c = s->host.clients + i;
@@ -565,36 +576,55 @@ static void host_tick(Env *env) {
     host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
     host_ent_tile_collision(env, host_ent_get(env, c->pc));
 
-    ToClntMsg msg = {
-      .kind = ToClntMsgKind_EntUpd,
-      .ent_upd = {
-        .id = 0,
-        .tick = tick,
-        .ent = {
-          .kind = EntKind_Thing, 
-          .x = cosf(env->ts()) * 50,
-          .y = sinf(env->ts()) * 50,
-        }
-      }
+    int scratch_id = 0;
+
+    /* lil lost spinny dude */
+    msg.ent_upd.id = scratch_id++;
+    msg.ent_upd.ent = (ClntEnt) {
+      .kind = EntKind_Player, 
+      .x = cosf(env->ts()) * 50,
+      .y = sinf(env->ts()) * 50,
     };
     env->send(&c->addr, (void *)&msg, sizeof(msg));
+
+    /* trap bullets */
+    for (int ty = 0; ty < map_rows(); ty++)
+      for (int tx = 0; tx < map_cols(); tx++) {
+        if (map_index(tx, ty) != '|') continue;
+
+        /* origin is center of the tile */
+        float ox = map_x_to_world(tx) + map_tile_world_size/2;
+        float oy = map_y_to_world(ty) + map_tile_world_size/2;
+
+        /* shoot towards row 2 on Y axis */
+        float dx = ox - (map_x_to_world(tx) + map_tile_world_size/2);
+        float dy = oy - (map_y_to_world( 2) + map_tile_world_size/2);
+        norm(&dx, &dy);
+        dx *= 2.5f * map_tile_world_size + 8*4/2;
+        dy *= 2.5f * map_tile_world_size + 8*4/2;
+
+        /* how far along is bullet on its journey? */
+        float t = fmodf(-sec / 3.0f, 1.0f);
+
+        msg.ent_upd.id = scratch_id++;
+        msg.ent_upd.ent = (ClntEnt) {
+          .kind = EntKind_Fireball, 
+          .x = ox + t*dx,
+          .y = oy + t*dy,
+        };
+        env->send(&c->addr, (void *)&msg, sizeof(msg));
+      }
 
     for (int i = 0; i < WQ_ENTS_MAX; i++) {
       HostEnt *e = state(env)->host.ents + i;
       if (e->kind == EntKind_Empty) continue;
 
-      ToClntMsg msg = {
-        .kind = ToClntMsgKind_EntUpd,
-        .ent_upd = {
-          .id = i,
-          .tick = tick,
-          .ent = {
-            .kind = EntKind_Thing, 
-            .you = c->pc == i,
-            .x = e->x,
-            .y = e->y,
-          }
-        }
+      msg.ent_upd.id = i;
+      msg.ent_upd.ent = (ClntEnt) {
+        .kind = e->kind, 
+        .you = c->pc == i,
+        .x = e->x,
+        .y = e->y,
       };
       env->send(&c->addr, (void *)&msg, sizeof(msg));
     }
@@ -611,7 +641,7 @@ static void host_poll(Env *env) {
     double dt = now - s->host.last;
     s->host.dt_acc += dt;
 
-    double FREQ = 1.0 / 20.0;
+    double FREQ = 1.0 / TICK_SECOND;
     while (s->host.dt_acc > FREQ)
       s->host.dt_acc -= FREQ,
       host_tick(env);
@@ -627,7 +657,7 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
 
     EntId pc = host_ent_next(env);
     *host_ent_get(env, pc) = (HostEnt) {
-      .kind = EntKind_Thing,
+      .kind = EntKind_Player,
       .x = 50,
       .y = 50,
     };
