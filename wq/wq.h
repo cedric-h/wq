@@ -114,6 +114,9 @@ typedef struct {
   void (*trace_begin)(char *str, size_t size);
   void (*trace_end)(void);
 
+  void (*dbg_sys_run)(char *cmd, char *buf, int *buf_len);
+  void (*dbg_dylib_reload)(void);
+
 } Env;
 
 typedef struct {

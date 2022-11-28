@@ -33,6 +33,56 @@ static double env_ts(void) {
 	return (double)(tick - start) / (double)freq;
 }
 
+HANDLE g_hChildStd_OUT_Rd = NULL;
+HANDLE g_hChildStd_OUT_Wr = NULL;
+
+static void env_dbg_sys_run(char *cmd, char *buf, int *buf_len) {
+	SECURITY_ATTRIBUTES saAttr; 
+
+	// Set the bInheritHandle flag so pipe handles are inherited. 
+	saAttr.nLength = sizeof(SECURITY_ATTRIBUTES); 
+	saAttr.bInheritHandle = TRUE; 
+	saAttr.lpSecurityDescriptor = NULL; 
+
+	// Create a pipe for the child process's STDOUT. 
+	if ( ! CreatePipe(&g_hChildStd_OUT_Rd, &g_hChildStd_OUT_Wr, &saAttr, 0) ) 
+		puts("StdoutRd CreatePipe"), exit(1); 
+
+	// Ensure the read handle to the pipe for STDOUT is not inherited.
+	if ( ! SetHandleInformation(g_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0) )
+		puts("Stdout SetHandleInformation"), exit(1); 
+
+
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+
+	ZeroMemory( &si, sizeof(si) );
+	si.cb = sizeof(si);
+	ZeroMemory( &pi, sizeof(pi) );
+
+	si.hStdError = g_hChildStd_OUT_Wr;
+	si.hStdOutput = g_hChildStd_OUT_Wr;
+	si.dwFlags |= STARTF_USESTDHANDLES;
+
+	CreateProcessA(
+		NULL,
+		cmd,
+		NULL,
+		NULL,
+		TRUE,
+		0,
+		NULL,
+		NULL,
+		&si,
+		&pi
+	);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	CloseHandle(g_hChildStd_OUT_Wr);
+
+	ReadFile(g_hChildStd_OUT_Rd, buf, *buf_len, buf_len, NULL);
+}
+
 
 #ifdef TRACE
   #define SPALL_IMPLEMENTATION
@@ -65,18 +115,24 @@ static double env_ts(void) {
 #endif
 
 wq_DylibHook wq_lib = {0};
+static void env_dbg_dylib_reload(void) { }
+
 /* X macro black magic isnt worth it */
+
 Env env = {
-  .send_to_host = env_send_to_host,
-  .clnt_recv    = env_clnt_recv   ,
+  .send_to_host     = env_send_to_host    ,
+  .clnt_recv        = env_clnt_recv       ,
 
-  .host_recv    = env_host_recv   ,
-  .send         = env_send        ,
+  .host_recv        = env_host_recv       ,
+  .send             = env_send            ,
 
-  .ts           = env_ts          ,
+  .ts               = env_ts              ,
 
-  .trace_begin  = env_trace_begin ,
-  .trace_end    = env_trace_end   ,
+  .trace_begin      = env_trace_begin     ,
+  .trace_end        = env_trace_end       ,
+
+  .dbg_sys_run      = env_dbg_sys_run     ,
+  .dbg_dylib_reload = env_dbg_dylib_reload,
 };
 
 static LRESULT WINAPI WindowProc(
@@ -129,6 +185,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
     WSADATA wsa_data;
     WSAStartup(MAKEWORD(2, 2), &wsa_data);
   }
+
+  wq_lib = wq_dylib_hook_init();
 
   WNDCLASSEXW wc =
   {
@@ -199,7 +257,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
 
   for (;;)
   {
-    wq_lib = wq_dylib_hook_init();
+    wq_lib = wq_dylib_hook_init(); 
 
     MSG msg;
     while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))

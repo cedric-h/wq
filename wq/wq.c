@@ -30,10 +30,65 @@ static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
 
 static float inline lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
 static float inline inv_lerp(float min, float max, float p) { return (p - min) / (max - min); }
+static float inline lerp_rads(float a, float b, float t) {
+  float difference = fmodf(b - a, MATH_PI*2.0f),
+        distance = fmodf(2.0f * difference, MATH_PI*2.0f) - difference;
+  return a + distance * t;
+}
 static float inline fabsf(float f) { return f < 0 ? -f : f; }
+static inline float signf(float f) { return f < 0 ? -1 : 1; }
 #ifdef CUSTOM_MATH
 static inline float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
-static inline float signf(float f) { return f < 0 ? -1 : 1; }
+
+/* thx nakst bby uwu */
+// https://gitlab.com/nakst/essence/-/blob/master/shared/math.cpp
+typedef union { float f; uint32_t i; } ConvertFloatInteger;
+#define F(x) (((ConvertFloatInteger) { .i = (x) }).f)
+
+static inline float _ArcTangentFloat(float x) {
+	// Calculates arctan(x) for x in [0, 0.5].
+
+	float x2 = x * x;
+
+	return x * (F(0x3F7FFFF8) + x2 * (F(0xBEAAA53C) + x2 * (F(0x3E4BC990) + x2 * (F(0xBE084A60) + x2 * F(0x3D8864B0)))));
+}
+
+static inline float _EsCRTatanf(float x) {
+	int negate = 0;
+
+	if (x < 0) { 
+		x = -x; 
+		negate = 1; 
+	}
+
+	int reciprocalTaken = 0;
+
+	if (x > 1) {
+		x = 1 / x;
+		reciprocalTaken = 1;
+	}
+
+	float y;
+
+	if (x < 0.5f) {
+		y = _ArcTangentFloat(x);
+	} else {
+		y = 0.463647609000806116f + _ArcTangentFloat((2 * x - 1) / (2 + x));
+	}
+
+	if (reciprocalTaken) {
+		y = MATH_PI / 2 - y;
+	}
+	
+	return negate ? -y : y;
+}
+
+float atan2f(float y, float x) {
+	if (x == 0) return y > 0 ? MATH_PI / 2 : -MATH_PI / 2;
+	else if (x > 0) return _EsCRTatanf(y / x);
+	else if (y >= 0) return MATH_PI + _EsCRTatanf(y / x);
+	else return -MATH_PI + _EsCRTatanf(y / x);
+}
 
 // Remez' algorithm approximation
 // https://stackoverflow.com/questions/23837916/a-faster-but-less-accurate-fsin-for-intel-asm
@@ -71,6 +126,33 @@ static inline void norm(float *x, float *y) {
   if (m > 0.0f)
     *x /= m,
     *y /= m;
+}
+
+typedef struct {
+  struct { float x, y; } grip, tip, circ;
+  float radius;
+} LineHitsCircle;
+static int line_hits_circle(const LineHitsCircle *lhc) {
+  float v_x = lhc->tip.x - lhc->grip.x,
+        v_y = lhc->tip.y - lhc->grip.y;
+  float line_len = mag(v_x, v_y);
+  norm(&v_x, &v_y);
+
+  float u_x = lhc->circ.x - lhc->grip.x,
+        u_y = lhc->circ.y - lhc->grip.y;
+
+  /* sidecar is point where ray gets closest */
+  float uv_dot = u_x*v_x + u_y*v_y;
+  float sidecar_x = uv_dot * v_x;
+  float sidecar_y = uv_dot * v_y;
+  if (mag(sidecar_x, sidecar_y) > line_len) return 0;
+
+  /* this is the closest the ray gets to the circle */
+  float bridge_x = u_x - sidecar_x;
+  float bridge_y = u_y - sidecar_y;
+  float closest = mag(bridge_x, bridge_y);
+
+  return closest <= lhc->radius;
 }
 
 
@@ -249,25 +331,33 @@ typedef struct {
   } cfg;
 } Rcx;
 
-static uint32_t rcx_color(int r, int g, int b) {
+static inline uint32_t rcx_color(int r, int g, int b) {
   return (r << 0) & 0x000000FF |
          (g << 4) & 0x0000FF00 |
          (b << 8) & 0x00FF0000 ;
 }
-static uint32_t rcx_decompose(uint32_t c, int *r, int *g, int *b) {
+static inline void rcx_decompose(uint32_t c, int *r, int *g, int *b) {
   *r = (c & 0x000000FF) >> 0;
   *g = (c & 0x0000FF00) >> 4;
   *b = (c & 0x00FF0000) >> 8;
 }
 
-/* plot pixel */
 Rcx *_rcx = 0;
+static inline void rcx_transform(float *x, float *y) {
+  float _x = *x,
+        _y = *y;
+  *x = _rcx->cfg.mat[0]*_x + _rcx->cfg.mat[2]*_y - _rcx->cfg.origin.x;
+  *y = _rcx->cfg.mat[1]*_x + _rcx->cfg.mat[3]*_y - _rcx->cfg.origin.y;
+}
+
+/* plot pixel */
 static void rcx_p(int x, int y, uint32_t p) {
+  /* transform in floatspace roudning to pixel ints */
   float _x = x,
         _y = y;
-  x = _rcx->cfg.mat[0]*_x + _rcx->cfg.mat[2]*_y - _rcx->cfg.origin.x;
-  y = _rcx->cfg.mat[1]*_x + _rcx->cfg.mat[3]*_y - _rcx->cfg.origin.y;
-
+  rcx_transform(&_x, &_y);
+  x = _x;
+  y = _y;
 
   /* put it on the centered, 16:9 "canvas" */
   x += (_rcx->raw_size.x - _rcx->size.x)/2;
@@ -377,71 +467,118 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
 
   /* --- world space? --- */
 
-  {
+  /* a quest of self-discovery */
+  ClntEnt *you = NULL;
+  for (int i = 0; i < WQ_ENTS_MAX; i++) {
+    ClntEnt *e = state(env)->clnt.ents + i;
+    if (e->you) { you = e; break; }
+  }
+
+  if (you) {
     State *s = state(env);
 
-    _rcx->cfg.origin.x = s->clnt.cam.x;
-    _rcx->cfg.origin.y = s->clnt.cam.y;
+    /* where to put sword? */
+    typedef enum {
+      KF_Rotates = (1 << 0),
+      KF_Moves   = (1 << 1),
+      KF_Damages = (1 << 2),
+    } KF_Flag;
+    typedef struct {
+      float duration;
+      KF_Flag flags;
+      float rot;
+      float x, y;
+    } KeyFrame;
 
-    double t = fmodf(env->ts(), 1.0f);
+    float rot = atan2f(you->y, you->x) - MATH_PI*0.45f;
+    float rest_rot = rot;
+    float swing = -0.5f;
+    KeyFrame keys[] = {
+      {0.2174f,              KF_Rotates | KF_Moves, rot-swing * 1.f },
+      {0.2304f,              KF_Rotates           , rot-swing * 2.f },
+      {0.0870f, KF_Damages | KF_Rotates           , rot+swing * 2.f },
+      {0.2478f,              KF_Rotates           , rot+swing * 3.f },
+      {0.2174f,              KF_Rotates | KF_Moves,        rest_rot },
+    };
+    // int hand = 0;
+    // int rest = sizeof(keys)/sizeof(keys[0]) - 1;
+    // kf[hand].x = 0.0f;
+    // kf[hand].y = 0.0f;
+    // kf[rest].x = 0.0f;
+    // kf[rest].y = 0.0f;
 
-    double r = t * MATH_TAU;
+    float out_x = 0;
+    float out_y = 0;
+    float out_rot = rest_rot;
+    int out_dmg = 0;
+
+    double time = fmodf(env->ts() / 1.7f, 1.0f);
+    for (KeyFrame *f = keys;
+        (f - keys) < sizeof(keys)/sizeof(keys[0]);
+        f++
+    ) {
+      if (time > f->duration) {
+        time -= f->duration;
+        if (f->flags & KF_Rotates) out_rot = f->rot;
+        if (f->flags & KF_Moves) out_x = f->x,
+                                 out_y = f->y;
+        continue;
+      };
+
+      float t = time / f->duration;
+      if (f->flags & KF_Rotates) out_rot = lerp_rads(out_rot, f->rot, t);
+      if (f->flags & KF_Moves) out_x = lerp(out_x, f->x, t),
+                               out_y = lerp(out_y, f->y, t);
+      if (f->flags & KF_Damages) out_dmg = 1;
+      break;
+    }
+
+    /* okay put sword there */
+    _rcx->cfg.origin.x = s->clnt.cam.x - out_x;
+    _rcx->cfg.origin.y = s->clnt.cam.y - out_y;
+
+    float r = out_rot;
     memcpy(_rcx->cfg.mat, (float []) {
-       cosf(r), sinf(r),
-      -sinf(r), cosf(r)
+       cosf(r)     , sinf(r),
+      -sinf(r)*2.0f, cosf(r)*2.0f
     }, sizeof(float[4]));
 
     _rcx->cfg.text_color = 0xFFFFFFFF;
     rcx_char(
        0.0f - 5*8/2,
-       0.0f - 5*8/2,
+       0.0f - 5*8*0.2f,
       5, '!'
     );
-    memcpy(_rcx->cfg.mat, (float []) { 1, 0, 0, 1 }, sizeof(float[4]));
 
+    if (out_dmg) {
+      LineHitsCircle lhc = {
+        .tip.y = 5*8 * 0.75f,
+
+        .grip.x = out_x,
+        .grip.y = out_y,
+
+        .circ.x = you->x,
+        .circ.y = you->y,
+        .radius = 5*8/2,
+      };
+      _rcx->cfg.origin.x = 0.0f;
+      _rcx->cfg.origin.y = 0.0f;
+      rcx_transform(&lhc.tip.x, &lhc.tip.y);
+
+      if (line_hits_circle(&lhc))
+        log(env, "ouch!");
+    }
+
+    /* hrmmgh would be cool if there was a default cfg you could just plop on */
+    memcpy(_rcx->cfg.mat, (float []) { 1, 0, 0, 1 }, sizeof(float[4]));
     _rcx->cfg.origin.x = 0.0f;
     _rcx->cfg.origin.y = 0.0f;
-
-#if 0
-    typedef enum {
-      KeyFrame_Rotates = (1 << 0),
-      KeyFrame_Moves   = (1 << 1),
-      KeyFrame_Damages = (1 << 2),
-    } KeyFrame_Flag;
-    typedef struct {
-      float duration;
-      KeyFrame_Flag flags;
-      float rot;
-      float x, y;
-    } KeyFrame;
-
-    KeyFrame keys = {
-      {0.2174f,              KF_Rotates | KF_Moves, rot-swing * 1.f, },
-      {0.2304f,              KF_Rotates           , rot-swing * 2.f, },
-      {0.0870f, KF_Damages | KF_Rotates           , rot+swing * 2.f, },
-      {0.2478f,              KF_Rotates           , rot+swing * 3.f, },
-      {0.2174f,              KF_Rotates | KF_Moves,        rest_rot, },
-    }
-    int hand = 0;
-    int rest = sizeof(keys)/sizeof(keys[0]) - 1;
-    kf[hand].x = 0.0f;
-    kf[hand].y = 0.0f;
-    kf[rest].x = 0.0f;
-    kf[rest].y = 0.0f;
-#endif
   }
 
   {
     t_begin("ents");
 
     State *s = state(env);
-
-    /* a quest of self-discovery */
-    ClntEnt *you = NULL;
-    for (int i = 0; i < WQ_ENTS_MAX; i++) {
-      ClntEnt *e = s->clnt.ents + i;
-      if (e->you) { you = e; break; }
-    }
 
     /* move cam to you */
     if (you) {
@@ -486,13 +623,13 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
         if (!map_in_bounds(tx, ty)) continue;
         if (map_index(tx, ty) == '.') continue;
 
-        uint32_t color = 0xFF0000FF;
+        uint32_t color = 0xAA4444AA;
         if (map_index(tx, ty) == '|') {
           float cx = fabsf((x - map_x_to_world(tx)) / map_tile_world_size);
           float cy = fabsf((y - map_y_to_world(ty)) / map_tile_world_size);
 
           if (mag(0.5f - cx, 0.5f - cy) < 0.20f)
-            color = 0xFFFF00FF;
+            color = 0xFF4444FF;
           else
             continue;
         }
@@ -698,6 +835,7 @@ static int host_ent_tile_collision(Env *env, HostEnt *e) {
     if (fabsf(dy) > he) hit = 1, e->y = cy + he * signf(dy);
     return hit;
   }
+  return 0;
 }
 
 /* how many ticks in a second? */
@@ -960,7 +1098,32 @@ EXPORT void wq_input(Env *env, char c, int down) {
     state(env);
   }
 
-  if (c == WqVk_Tilde) s->log_open = down;
+  if (c == WqVk_Tilde) {
+    s->log_open = down;
+
+    char buf[1024] = {0};
+    int len = sizeof(buf);
+    // env->dbg_sys_run("cl /nologo /Zi /LD /O2 -o wq.dll ../wq/wq.c", buf, &len);
+    env->dbg_sys_run(
+      "tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c",
+      buf, &len
+    );
+
+    buf[sizeof(buf)-1] = 0; /* just in case */
+    char *eof = strchr(buf, 10);
+    if (eof) *eof = 0;
+    log(env, buf);
+
+    log(env, "woah");
+    env->dbg_dylib_reload();
+
+    // for (int i = 0; i < len; i++) {
+    //   char str[255] = {0};
+    //   snprintf(str, sizeof(str), "%d", buf[i]);
+    //   log(env, str);
+    // }
+  }
+
 
   s->clnt.keysdown[c] = down;
 
