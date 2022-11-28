@@ -12,8 +12,8 @@ source ~/msvc/setup.sh
 
 # tcc -shared -o wq.dll ../wq/wq.c 
 # tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c
-cl //Zi //LD //O2 -o wq.dll ../wq/wq.c
+cl //nologo //Zi //LD //O2 ../wq/wq.c //link //out:wq.dll
 
 # dynamic build
-cl //Zi ../main.c
+cl //nologo //Zi ../main.c
 ./main.exe

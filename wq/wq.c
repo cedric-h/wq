@@ -323,7 +323,7 @@ typedef struct {
   struct { int x, y; } raw_size;
   struct { int x, y; } size;
   struct {
-    int text_size;
+    int text_size, newline_dir;
     uint32_t text_color;
     float alpha;
     float mat[4];
@@ -403,7 +403,7 @@ static void rcx_str_cursor(int *x, int *y, char *str) {
   int scale = _rcx->cfg.text_size;
   for (; *str; *str++) {
     if (*str == '\n')
-      *y -= 8*scale,
+      *y += 8*scale * _rcx->cfg.newline_dir,
       *x = start;
     else
       rcx_char(*x += 8*scale, *y, scale, *str);
@@ -424,7 +424,7 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
 
   /* you probably want this to be an identity matrix */
   memcpy(_rcx->cfg.mat, (float []) { 1, 0, 0, 1 }, sizeof(float[4]));
-  _rcx->cfg.alpha = 1;
+  _rcx->cfg.newline_dir = _rcx->cfg.alpha = 1;
 
   /* what's the biggest we can be and preserve 16x9? */
   {
@@ -689,6 +689,7 @@ EXPORT void wq_render(Env *env, PixelDesc *pd) {
     char buf[16] = {0};
     snprintf(buf, 16, "%.1fms\n%dx%d", 1000*average, _rcx->size.x, _rcx->size.y);
 
+    _rcx->cfg.newline_dir = -1;
     int scale = 8*(_rcx->cfg.text_size = 1);
     rcx_str(_rcx->size.x - scale*5,
             _rcx->size.y - scale*1, buf);
@@ -1101,27 +1102,21 @@ EXPORT void wq_input(Env *env, char c, int down) {
   if (c == WqVk_Tilde) {
     s->log_open = down;
 
-    char buf[1024] = {0};
+    log(env, "recompiling ...");
+    char buf[1024*2*2*2] = {0};
     int len = sizeof(buf);
-    // env->dbg_sys_run("cl /nologo /Zi /LD /O2 -o wq.dll ../wq/wq.c", buf, &len);
-    env->dbg_sys_run(
-      "tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c",
-      buf, &len
-    );
+    env->dbg_sys_run("cl /nologo /Zi /LD /O2 ../wq/wq.c /link /out:wq.dll", buf, &len);
+
+    // env->dbg_sys_run(
+    //   "tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c",
+    //   buf, &len
+    // );
 
     buf[sizeof(buf)-1] = 0; /* just in case */
-    char *eof = strchr(buf, 10);
-    if (eof) *eof = 0;
     log(env, buf);
+    log(env, "recompilation done!");
 
-    log(env, "woah");
     env->dbg_dylib_reload();
-
-    // for (int i = 0; i < len; i++) {
-    //   char str[255] = {0};
-    //   snprintf(str, sizeof(str), "%d", buf[i]);
-    //   log(env, str);
-    // }
   }
 
 

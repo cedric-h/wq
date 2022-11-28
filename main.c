@@ -80,7 +80,12 @@ static void env_dbg_sys_run(char *cmd, char *buf, int *buf_len) {
 	CloseHandle(pi.hThread);
 	CloseHandle(g_hChildStd_OUT_Wr);
 
-	ReadFile(g_hChildStd_OUT_Rd, buf, *buf_len, buf_len, NULL);
+  int len = 0;
+	while (ReadFile(g_hChildStd_OUT_Rd, buf, *buf_len, &len, NULL) && len);
+  *buf_len = len;
+
+  puts(buf);
+  fflush(stdout);
 }
 
 
