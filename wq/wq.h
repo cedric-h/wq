@@ -10,6 +10,7 @@
 
 typedef enum {
   WqVk_W     = 17,
+  WqVk_T     = 20,
   WqVk_S     = 31,
   WqVk_A     = 30,
   WqVk_D     = 32,
@@ -97,6 +98,9 @@ typedef struct {
     int len;
   } stash;
 
+  struct { int x, y; } mouse;
+  struct { int x, y; } win_size;
+
   /* NOTE: will fail if nobody's hosting */
   int (*send_to_host)(uint8_t *buf, int len);
   /* try to receive a message from the server, as a client */
@@ -119,23 +123,19 @@ typedef struct {
 
 } Env;
 
-typedef struct {
-  uint32_t *pixels;
-  int stride;
-  struct { int x, y; } size;
-} PixelDesc;
-
-EXPORT void _wq_render(Env *env, PixelDesc *pd);
-EXPORT void _wq_update(Env *env);
-EXPORT void _wq_input (Env *env, char vk, int down);
+EXPORT void _wq_render  (Env *env, uint32_t *pixels, int stride);
+EXPORT void _wq_update  (Env *env);
+EXPORT void _wq_keyboard(Env *env, char vk, int down);
+EXPORT void _wq_mousebtn(Env *env, int down);
 
 #ifdef WQ_HOST_ENV // obviously dylib doesn't need to know
 #include "wq/dylib.h"
 
 typedef struct {
-  void (*wq_render)(Env *env, PixelDesc *pd);
-  void (*wq_update)(Env *env);
-  void (*wq_input )(Env *env, char vk, int down);
+  void (*wq_render  )(Env *env, uint32_t *pixels, int stride);
+  void (*wq_update  )(Env *env);
+  void (*wq_keyboard)(Env *env, char vk, int down);
+  void (*wq_mousebtn)(Env *env, int down);
 } wq_DylibHook;
 
 static wq_DylibHook wq_dylib_hook_init(void) {
@@ -143,9 +143,10 @@ static wq_DylibHook wq_dylib_hook_init(void) {
 
   wq_DylibHook ret = {0};
 
-  ret.wq_render = dylib_get("_wq_render");
-  ret.wq_input  = dylib_get("_wq_input" );
-  ret.wq_update = dylib_get("_wq_update");
+  ret.wq_render   = dylib_get("_wq_render");
+  ret.wq_update   = dylib_get("_wq_update");
+  ret.wq_keyboard = dylib_get("_wq_keyboard");
+  ret.wq_mousebtn = dylib_get("_wq_mousebtn");
 
   return ret;
 }
@@ -153,9 +154,10 @@ static wq_DylibHook wq_dylib_hook_init(void) {
 #else
 
 /* good honest christian decls, no satanic DLL trickery */
-#define wq_render _wq_render
-#define wq_update _wq_update
-#define wq_input  _wq_input
+#define wq_render   _wq_render  
+#define wq_update   _wq_update  
+#define wq_keyboard _wq_keyboard
+#define wq_mousebtn _wq_mousebtn
 
 #endif
 

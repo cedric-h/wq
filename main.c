@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define VC_EXTRALEAN
 #include <Windows.h>
+#include <windowsx.h>
 #include <d3d11.h>
 
 #include <stdint.h>
@@ -80,9 +81,12 @@ static void env_dbg_sys_run(char *cmd, char *buf, int *buf_len) {
 	CloseHandle(pi.hThread);
 	CloseHandle(g_hChildStd_OUT_Wr);
 
-  int len = 0;
-	while (ReadFile(g_hChildStd_OUT_Rd, buf, *buf_len, &len, NULL) && len);
-  *buf_len = len;
+  {
+    int i = 0, len = 0;
+    while (ReadFile(g_hChildStd_OUT_Rd, buf+i, *buf_len, &len, NULL) && len)
+      i += len;
+    *buf_len = len;
+  }
 
   puts(buf);
   fflush(stdout);
@@ -155,8 +159,25 @@ static LRESULT WINAPI WindowProc(
     //   wq_lib.wq_input(&env, wparam);
     // } return 0;
 
+    case WM_LBUTTONDOWN: {
+      env.mouse.x = GET_X_LPARAM(lparam);
+      env.mouse.y = GET_Y_LPARAM(lparam);
+      wq_lib.wq_mousebtn(&env, 1);
+    } return 0;
+
+    // case WM_LBUTTONUP: {
+    //   env.mouse.x = GET_X_LPARAM(lparam);
+    //   env.mouse.y = GET_Y_LPARAM(lparam);
+    //   wq_lib.wq_mousebtn(&env, 0);
+    // } return 0;
+
+    case WM_MOUSEMOVE: {
+      env.mouse.x = GET_X_LPARAM(lparam);
+      env.mouse.y = GET_Y_LPARAM(lparam);
+    } return 0;
+
     case WM_KEYDOWN: {
-      wq_lib.wq_input(&env, HIWORD(lparam) & (KF_EXTENDED | 0xff), 1);
+      wq_lib.wq_keyboard(&env, HIWORD(lparam) & (KF_EXTENDED | 0xff), 1);
     } return 0;
 
     case WM_KEYUP: {
@@ -168,7 +189,7 @@ static LRESULT WINAPI WindowProc(
         exit(0);
       }
 #endif
-      wq_lib.wq_input(&env, vk, 0);
+      wq_lib.wq_keyboard(&env, vk, 0);
     } return 0;
   }
   return DefWindowProcW(wnd, msg, wparam, lparam);
@@ -259,9 +280,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
   Assert(SUCCEEDED(hr));
 
   ShowWindow(window, SW_SHOWDEFAULT);
+  void *arrow = LoadCursorA(NULL, IDC_ARROW);
 
   for (;;)
   {
+    SetCursor(arrow);
+
     wq_lib = wq_dylib_hook_init(); 
 
     MSG msg;
@@ -329,11 +353,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev, LPWSTR cmdline, int cmds
       Assert(SUCCEEDED(hr));
 
       // write pixels directly to this memory
-      wq_lib.wq_render(&env, &(PixelDesc) {
-        .pixels = mapped.pData,
-        .stride = mapped.RowPitch/sizeof(uint32_t),
-        .size = { width, height }
-      });
+      env.win_size.x = width;
+      env.win_size.y = height;
+      wq_lib.wq_render(&env, mapped.pData, mapped.RowPitch/sizeof(uint32_t));
 
       wq_lib.wq_update(&env);
 

@@ -12,8 +12,25 @@ source ~/msvc/setup.sh
 
 # tcc -shared -o wq.dll ../wq/wq.c 
 # tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c
-cl //nologo //Zi //LD //O2 ../wq/wq.c //link //out:wq.dll
+# cl //fsanitize=address //Zi //nologo //LD //O2 ../wq/wq.c //link //out:wq.dll
 
-# dynamic build
-cl //nologo //Zi ../main.c
-./main.exe
+# compile DLL -- "wq/wq.c"
+if [[ "dbg" == $1 ]]; then
+	cl //fsanitize=address //Zi //nologo //LD ../wq/wq.c //link //out:wq.dll
+else 
+	cl //nologo //Zi //O2 //WX //LD ../wq/wq.c //link //out:wq.dll
+fi
+
+# compile host executable -- "main.c"
+if [[ "dbg" == $1 ]]; then
+	cl //fsanitize=address //Zi //nologo ../main.c
+else 
+	cl //nologo //Zi //O2 ../main.c
+fi
+
+# run that sucker
+if [[ "dbg" == $1 ]]; then
+	remedybg main.exe
+else
+	./main.exe
+fi
