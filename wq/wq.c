@@ -271,6 +271,7 @@ typedef struct {
   char looks;
   float x, y;
   uint8_t is_player, sword;
+  uint16_t hp, max_hp;
 
   struct { uint32_t tick_start, tick_end; float dir; } swing;
 } HostEnt;
@@ -279,6 +280,7 @@ typedef struct {
   char looks;
   float x, y;
   uint8_t you, sword;
+  uint16_t hp, max_hp;
 
   struct { double ts_start, ts_end; float dir; } swing;
 } ClntEnt;
@@ -287,6 +289,7 @@ typedef struct {
   char looks;
   float x, y;
   uint8_t you, sword;
+  uint16_t hp, max_hp;
 } EntUpd;
 
 typedef enum {
@@ -725,6 +728,20 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
           py + player_world_size/2 * 0.8,
           3, '!'
         );
+
+      if (e->max_hp != e->hp) {
+        int y = py - player_world_size*0.4f;
+        int bar_len = player_world_size * 0.8;
+        int dx = (player_world_size - bar_len)/2;
+        for (int i = 0; i < bar_len; i++) {
+          int on = i == 0 || i == (bar_len-1) ||
+            (((float)i / (float)bar_len) < ((float)e->hp / (float)e->max_hp));
+
+                  rcx_p(dx + px + i, y + 0, 0xFF00FF00);
+          if (on) rcx_p(dx + px + i, y + 1, 0xFF00FF00);
+                  rcx_p(dx + px + i, y + 2, 0xFF00FF00);
+        }
+      }
     }
 
     t_end();
@@ -1340,6 +1357,10 @@ static void host_tick(Env *env) {
         .y = e->y,
       };
 
+      if (c->pc == i)
+        msg.ent_upd.ent.max_hp = 2,
+        msg.ent_upd.ent.hp = 1;
+
       if (e->kind == EntKind_Limbo)
         msg.ent_upd.ent.looks = 0;
 
@@ -1448,11 +1469,14 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
 
     if (tick >= s->clnt.last_known_tick) {
       s->clnt.last_known_tick = tick;
-      s->clnt.ents[msg->ent_upd.id].you   = msg->ent_upd.ent.you;
-      s->clnt.ents[msg->ent_upd.id].sword = msg->ent_upd.ent.sword;
-      s->clnt.ents[msg->ent_upd.id].x     = msg->ent_upd.ent.x;
-      s->clnt.ents[msg->ent_upd.id].y     = msg->ent_upd.ent.y;
-      s->clnt.ents[msg->ent_upd.id].looks = msg->ent_upd.ent.looks;
+      /* this is probably fine */
+      s->clnt.ents[msg->ent_upd.id].you    = msg->ent_upd.ent.you;
+      s->clnt.ents[msg->ent_upd.id].sword  = msg->ent_upd.ent.sword;
+      s->clnt.ents[msg->ent_upd.id].x      = msg->ent_upd.ent.x;
+      s->clnt.ents[msg->ent_upd.id].y      = msg->ent_upd.ent.y;
+      s->clnt.ents[msg->ent_upd.id].looks  = msg->ent_upd.ent.looks;
+      s->clnt.ents[msg->ent_upd.id].max_hp = msg->ent_upd.ent.max_hp;
+      s->clnt.ents[msg->ent_upd.id].hp     = msg->ent_upd.ent.hp;
     }
   }
   if (msg->kind == ToClntMsgKind_Swing) {
