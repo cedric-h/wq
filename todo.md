@@ -2,7 +2,7 @@
 
 Sawmill
   [x] sawmaze
-  [ ] sawdoor
+  [x] sawdoor
   [ ] sawminions
   [ ] sawmaster
   [ ] multimap, mofo

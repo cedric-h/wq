@@ -162,35 +162,31 @@ static void log(Env *e, char *p);
 
 /* --- map --- */
 #define map_tile_world_size (90)
+#define player_world_size (8*4)
 typedef struct {
   struct { float x, y; } world_offset;
   struct {   int x, y; } tile_size;
   int str_rows, str_cols;
 } Map;
 
-// char map_str[] = 
-//   "BBBBBBBBBBBBBBBBBBBBBBB\n"
-//   "B....B.BvB.BvB.BvB...vB\n"
-//   "B..................!...\n"
-//   "B....B^B.B^B.B^B.B...^B\n"
-//   "BBBBBBBBBBBBBBBBBBBBBBB\n";
 char map_str[] = 
-  "B.B.B.B.B.B.B.B.B.B.B.B\n"
-  ".B.B.B.B.B.B.B.B.B.B.B.\n"
-  "B.B.B.B.B.B.B.B.B.B.B.B\n"
-  ".B.B.B.B.B.B.B.B.B.B.B.\n"
-  "B.B.B.B.B.B.B.B.B.B.B.B\n";
-
+  "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+  "B....B.BvB.BvB.BvB...vB....B\n"
+  "B..................!h....e..\n"
+  "B....B^B.B^B.B^B.B...^B....B\n"
+  "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
 
 static inline int map_flip_y(Map *map, int y) { return map->tile_size.y - 1 - y; }
 
 static inline int map_x_from_world(Map *map, float x) {
+  x += map->world_offset.x;
   if (x < 0) return -9999;
-  return                 (x + map->world_offset.x) / (float)map_tile_world_size ;
+  return x / (float)map_tile_world_size;
 }
 static inline int map_y_from_world(Map *map, float y) {
+  y += map->world_offset.y;
   if (y < 0) return -9999;
-  return map_flip_y(map, (y + map->world_offset.y) / (float)map_tile_world_size);
+  return map_flip_y(map, y / (float)map_tile_world_size);
 }
 
 static inline float map_x_to_world(Map *map, float x)
@@ -293,10 +289,25 @@ typedef struct {
   uint8_t you, sword;
 } EntUpd;
 
+typedef enum {
+  SawMinionState_Init,
+  SawMinionState_Think,
+  SawMinionState_Charge,
+  SawMinionState_Attack,
+  SawMinionState_Dead,
+} SawMinionState;
+typedef struct {
+  SawMinionState state;
+  double ts_state_start, ts_state_end;
+  struct { float x, y; } pos_state_start,
+                         pos_state_end; /* <- meaning depends on state */
+} SawMinion;
+
 typedef struct {
   uint32_t dead_on_cycle[10];
   uint32_t dead_after_cycle[10];
   uint8_t sword_collected;
+  SawMinion saw_minion;
 } TutorialState;
 
 /* client ents are basically just a networking abstraction
@@ -352,7 +363,7 @@ static State *state(Env *env) {
     /* --- init state --- */
     for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
 
-    state(env)->host.next_ent += 25; /* i need some scratch ents for my mad hax */
+    state(env)->host.next_ent += 100; /* i need some scratch ents for my mad hax */
     /* lol tick 0 is special because lazy */
     state(env)->host.tick_count = 1;
 
@@ -703,15 +714,15 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
       int px, py;
       rcx_char(
-        px = (e->x - s->clnt.cam.x - 4*8/2),
-        py = (e->y - s->clnt.cam.y - 4*8/2),
+        px = (e->x - s->clnt.cam.x - player_world_size/2),
+        py = (e->y - s->clnt.cam.y - player_world_size/2),
         4, c
       );
 
       if (e->sword && !rcx_ent_swing(env, e))
         rcx_char(
-          px + 4*8/2 * 1.4,
-          py + 4*8/2 * 0.8,
+          px + player_world_size/2 * 1.4,
+          py + player_world_size/2 * 0.8,
           3, '!'
         );
     }
@@ -799,7 +810,6 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
     char buf[16] = {0};
     snprintf(buf, 16, "%.1fms\n%dx%d", 1000*average, _rcx->size.x, _rcx->size.y);
-    if (you) snprintf(buf, 16, "%.1fms\n%.1f\n%.1f", 1000*average, you->x, you->y);
 
     int scale = 8*(_rcx->cfg.text_size = 1);
     rcx_str(_rcx->size.x - scale*10,
@@ -881,12 +891,12 @@ static int host_ent_ent_collision(HostEntEntCollisionState *heecs) {
   /* quadratic perf goes weeee */
   for (; heecs->i < WQ_ENTS_MAX; heecs->i++) {
     HostEnt *e = state(heecs->env)->host.ents + heecs->i;
-    if (e->kind == EntKind_Empty) continue;
+    if (e->kind <= EntKind_Limbo) continue;
     if (e == heecs->collider) continue;
 
     float dx = e->x - heecs->collider->x;
     float dy = e->y - heecs->collider->y;
-    if (mag(dx, dy) < 8*4) {
+    if (mag(dx, dy) < player_world_size) {
       /* gotta make sure to increment here, wont hit loop end */
       heecs->hit_id = heecs->i++;
       return 1;
@@ -972,7 +982,7 @@ static int host_ent_sword_collision(Env *env, HostEnt *p) {
   /* quadratic perf goes weee */
   for (int i = 0; i < WQ_ENTS_MAX; i++) {
     HostEnt *e = state(env)->host.ents + i;
-    if (e->kind == EntKind_Empty) continue;
+    if (e->kind <= EntKind_Limbo) continue;
     if (e == p) continue;
     if (!e->sword) continue;
     if (e->swing.tick_end < tick) continue;
@@ -1129,7 +1139,7 @@ static void host_tick(Env *env) {
 
     /* did you swipe our shooty thingy!? */
     if (host_ent_sword_collision(env, shooty))
-      ts->dead_after_cycle[fb_i] = (int)cycle;
+      ts->dead_after_cycle[fb_i] = (int)cycle-1;
 
     fb_i++;
   }
@@ -1174,6 +1184,141 @@ static void host_tick(Env *env) {
     fb_i++;
   }
 
+  /* saw minions */
+  mi = (MapIter) { .map = map };
+  while (map_iter(&mi, 'e')) {
+    HostEnt *sme = host_ent_get(env, scratch_id++);
+    *sme = (HostEnt) { .kind = EntKind_Alive, .looks = 'e' };
+    SawMinion *sm = &ts->saw_minion;
+
+    HostEnt *fbe = host_ent_get(env, scratch_id++);
+    *fbe = (HostEnt) { .kind = EntKind_Limbo, .looks = 'o' };
+
+    double WAIT = 0.8;
+    float ATTACK_DIST_MIN = player_world_size * 1.25;
+    float ATTACK_DIST_MAX = map_tile_world_size;
+    float t = (sm->state == SawMinionState_Init)
+      ? 0
+      : inv_lerp(sm->ts_state_start, sm->ts_state_end, env->ts());
+    if (t > 1) t = 1;
+
+    switch (sm->state) {
+
+      case (SawMinionState_Init): {
+        /* saw minion is at tile center */
+        float ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
+        float oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
+
+        sme->x = sm->pos_state_start.x = ox;
+        sme->y = sm->pos_state_start.y = oy;
+
+        sm->state = SawMinionState_Think;
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + WAIT;
+      } break;
+
+      case (SawMinionState_Dead): {
+        sme->kind = EntKind_Limbo;
+      } break;
+
+      case (SawMinionState_Think): {
+        sme->x = sm->pos_state_start.x;
+        sme->y = sm->pos_state_start.y;
+
+        if (t < 1.0) break;
+
+        /* find nearest player in ent list */
+        float best_dist = 3 * map_tile_world_size;
+        HostEnt *best_target = NULL;
+        for (int i = 0; i < WQ_ENTS_MAX; i++) {
+          HostEnt *e = state(env)->host.ents + i;
+          if (e->kind <= EntKind_Limbo) continue;
+          if (!e->is_player) continue;
+
+          float dist = mag(e->x - sme->x,
+                           e->y - sme->y);
+          if (dist < best_dist)
+            best_dist = dist,
+            best_target = e;
+        }
+        if (best_target == NULL) break;
+
+        float dx = best_target->x - sme->x;
+        float dy = best_target->y - sme->y;
+        norm(&dx, &dy);
+
+        /* move/shoot dist */
+        float action_dist = map_tile_world_size;
+
+        float adt = inv_lerp(ATTACK_DIST_MIN, ATTACK_DIST_MAX, best_dist);
+        /* great, we're the proper distance away to attack */
+        if (adt >= 0 && adt <= 1) sm->state = SawMinionState_Attack;
+        else {
+          sm->state = SawMinionState_Charge;
+
+          float ideal = (adt < 0) ? ATTACK_DIST_MIN : ATTACK_DIST_MAX;
+
+          /* in which direction and how far do we need to go to get to ideal? */
+          /* ex: we need to back up, ideal is MIN, best_dist is slightly under.
+           * this will be negative, which makes sense! */
+          float delta = best_dist - ideal;
+          action_dist = delta;
+        }
+
+        /* let's reevaluate after a bit, though */ 
+        if (action_dist > map_tile_world_size) action_dist = map_tile_world_size;
+
+        double SECS_PER_PIXEL = WAIT / map_tile_world_size;
+
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
+        sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
+        sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
+      } break;
+
+      case (SawMinionState_Attack): {
+        sme->x = sm->pos_state_start.x;
+        sme->y = sm->pos_state_start.y;
+
+        fbe->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
+        fbe->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
+        fbe->kind = EntKind_Alive;
+
+        HostEntEntCollisionState heecs = { .env = env, .collider = fbe };
+        while (host_ent_ent_collision(&heecs)) {
+          HostEnt *hit = host_ent_get(env, heecs.hit_id);
+          if (hit->is_player) {
+            hit->x = hit->y = 0.0f;
+            sm->state = SawMinionState_Think;
+          }
+        }
+
+        if (t < 1.0) break;
+        sm->state = SawMinionState_Think;
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + WAIT;
+      } break;
+
+      case (SawMinionState_Charge): {
+        sme->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
+        sme->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
+
+        if (t < 1.0) break;
+        sm->state = SawMinionState_Think;
+        sm->pos_state_start.x = sm->pos_state_end.x;
+        sm->pos_state_start.y = sm->pos_state_end.y;
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + WAIT;
+      } break;
+
+    }
+
+    /* did you swipe our saw minion!? */
+    if (host_ent_sword_collision(env, sme))
+      sm->state = SawMinionState_Dead;
+  }
+
+  /* broadcast to ERRYBUDDY */
   ToClntMsg msg = {
     .kind = ToClntMsgKind_EntUpd,
     .ent_upd = { .tick = tick }
@@ -1261,8 +1406,8 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
       .kind = EntKind_Alive,
       .looks = 'p',
       .is_player = 1,
-      .x = 50,
-      .y = 50,
+      .x = 0,
+      .y = 0,
     };
     *client = (Client) {
       .active = 1,
