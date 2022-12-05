@@ -1266,8 +1266,16 @@ static void host_tick(Env *env) {
         }
         if (best_target == NULL) break;
 
-        float dx = best_target->x - sme->x;
-        float dy = best_target->y - sme->y;
+        /* fuzz target slightly to distribute minions on ring around player */
+        float ring_size = best_dist * 0.3f;
+        if (ring_size < ATTACK_DIST_MIN) ring_size = ATTACK_DIST_MIN;
+
+        float GOLDEN_RATIO = 1.61803f;
+        float target_x = best_target->x + cosf(GOLDEN_RATIO*sm_id) * ring_size;
+        float target_y = best_target->y + sinf(GOLDEN_RATIO*sm_id) * ring_size;
+        float dx = target_x - sme->x;
+        float dy = target_y - sme->y;
+        best_dist = mag(dx, dy);
         norm(&dx, &dy);
 
         /* move/shoot dist */
@@ -1275,7 +1283,14 @@ static void host_tick(Env *env) {
 
         float adt = inv_lerp(ATTACK_DIST_MIN, ATTACK_DIST_MAX, best_dist);
         /* great, we're the proper distance away to attack */
-        if (adt >= 0 && adt <= 1.05f) sm->state = SawMinionState_Attack;
+        if (adt >= 0 && adt <= 1.0f) {
+          sm->state = SawMinionState_Attack;
+
+          /* make sure to actually shoot the player */
+          dx = best_target->x - sme->x;
+          dy = best_target->y - sme->y;
+          norm(&dx, &dy);
+        }
         else {
           sm->state = SawMinionState_Charge;
 
@@ -1292,17 +1307,6 @@ static void host_tick(Env *env) {
         if (action_dist > map_tile_world_size) action_dist = map_tile_world_size;
 
         double SECS_PER_PIXEL = WAIT / map_tile_world_size;
-
-        /* if the player is just out of our attack distance,
-         * let's fuzz our charge so we don't collide with our neighbors,
-         * and fuzz our attack so it might still hit */
-        if (adt > 1.0f) {
-          float GOLDEN_RATIO = 1.61803f;
-          float r = env->ts() + GOLDEN_RATIO*sm_id;
-          dx += cosf(r) * 0.5f;
-          dy += sinf(r) * 0.5f;
-          norm(&dx, &dy);
-        }
 
         sm->ts_state_start = env->ts();
         sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
