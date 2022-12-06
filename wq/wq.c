@@ -302,7 +302,7 @@ typedef enum {
 typedef struct {
   SawMinionState state;
   uint16_t hp;
-  double ts_state_start, ts_state_end;
+  double ts_no_damage_til, ts_state_start, ts_state_end;
   struct { float x, y; } pos_state_start,
                          pos_state_end; /* <- meaning depends on state */
 } SawMinion;
@@ -340,6 +340,9 @@ typedef struct {
     ClntEnt ents[WQ_ENTS_MAX];
     struct { float x, y; } cam;
     struct { float x, y; } cursor;
+#ifdef VISUALIZE_SWING
+    struct { float x, y; } tip, grip;
+#endif
   } clnt;
 
   int am_host;
@@ -601,7 +604,7 @@ static int rcx_ent_swing(Env *env, ClntEnt *ent) {
   float r = sa.out.rot - MATH_PI*0.5f;
   memcpy(_rcx->cfg.mat, (float []) {
      cosf(r)     , sinf(r),
-    -sinf(r)*2.0f, cosf(r)*2.0f
+    -sinf(r)*1.0f, cosf(r)*1.0f
   }, sizeof(float[4]));
 
   _rcx->cfg.text_color = 0xFFFFFFFF;
@@ -694,8 +697,17 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
   /* a quest of self-discovery */
   ClntEnt *you = clnt_ent_you(env);
 
-  rcx_char(state(env)->clnt.cursor.x - 5*8/2,
-           state(env)->clnt.cursor.y - 5*8/2, 5, 'x');
+  {
+    State *s = state(env);
+    rcx_char(s->clnt.cursor.x - 5*8/2                ,
+             s->clnt.cursor.y - 5*8/2                , 5, 'x');
+#ifdef VISUALIZE_SWING
+    rcx_char(s->clnt.   tip.x - 3*8/2 - s->clnt.cam.x,
+             s->clnt.   tip.y - 3*8/2 - s->clnt.cam.y, 3, 'x');
+    rcx_char(s->clnt.  grip.x - 3*8/2 - s->clnt.cam.x,
+             s->clnt.  grip.y - 3*8/2 - s->clnt.cam.y, 3, 'x');
+#endif
+  }
 
   {
     t_begin("ents");
@@ -994,7 +1006,11 @@ static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e) {
   return 0;
 }
 
-static int host_ent_sword_collision(Env *env, HostEnt *p) {
+typedef struct {
+  HostEnt *hitter;
+  struct { float x, y; } swing_dir;
+} HostEntSwordCollisionOut;
+static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionOut *out) {
   uint32_t tick = state(env)->host.tick_count;
 
   /* quadratic perf goes weee */
@@ -1005,29 +1021,65 @@ static int host_ent_sword_collision(Env *env, HostEnt *p) {
     if (!e->sword) continue;
     if (e->swing.tick_end < tick) continue;
 
-    SwordAnim sa = {
-      .in.time = inv_lerp((float)e->swing.tick_start, (float)e->swing.tick_end, (float)tick),
-      .in.x = e->x,
-      .in.y = e->y,
-      .in.dir = e->swing.dir,
-    };
-    sword_anim(&sa);
-    // if (!sa.out.dmg) continue;
+    /* you swing: we simulate 100 sword positions, aka we do 100 sims.
+     * your swing lasts 5 ticks? that's 20 sword positions per tick. */
 
-    LineHitsCircle lhc = {
-      .tip .x = sa.out.x + cosf(sa.out.rot)*65,
-      .tip .y = sa.out.y + sinf(sa.out.rot)*65,
+    float t_start = e->swing.tick_start;
+    float t_end = e->swing.tick_end;
+    /* we simulate to the next tick */
+    int sim_start = floorf(100.0f * inv_lerp(t_start, t_end, (float)tick    ));
+    int sim_end   =  ceilf(100.0f * inv_lerp(t_start, t_end, (float)tick + 1));
 
-      .grip.x = sa.out.x,
-      .grip.y = sa.out.y,
+    for (int sim = sim_start; sim < sim_end; sim++) {
+      SwordAnim sa = {
+        .in.time = (float)sim / 100.0f,
+        .in.x = e->x,
+        .in.y = e->y,
+        .in.dir = e->swing.dir,
+      };
+      sword_anim(&sa);
+      if (!sa.out.dmg) continue;
 
-      .circ.x = p->x,
-      .circ.y = p->y,
-      .radius = 5*8/2,
-    };
+      float sword_len = 32;
+      LineHitsCircle lhc = {
+        .tip .x = sa.out.x + cosf(sa.out.rot)*sword_len,
+        .tip .y = sa.out.y + sinf(sa.out.rot)*sword_len,
 
-    if (line_hits_circle(&lhc))
-      return 1;
+        .grip.x = sa.out.x,
+        .grip.y = sa.out.y,
+
+        .circ.x = p->x,
+        .circ.y = p->y,
+        .radius = 5*8/2,
+      };
+#ifdef VISUALIZE_SWING
+      state(env)->clnt. tip.x = lhc. tip.x;
+      state(env)->clnt. tip.y = lhc. tip.y;
+      state(env)->clnt.grip.x = lhc.grip.x;
+      state(env)->clnt.grip.y = lhc.grip.y;
+#endif
+
+      if (line_hits_circle(&lhc)) {
+        if (out) {
+          out->hitter = e;
+
+          /* uhh where are we swinging towards? */
+          float now_tip_x = lhc.tip.x;
+          float now_tip_y = lhc.tip.y;
+
+          sa.in.time = (float)(sim - 1) / 100.0f;
+          sword_anim(&sa);
+          float last_tip_x = sa.out.x + cosf(sa.out.rot)*sword_len;
+          float last_tip_y = sa.out.y + sinf(sa.out.rot)*sword_len;
+
+          out->swing_dir.x = now_tip_x - last_tip_x;
+          out->swing_dir.y = now_tip_y - last_tip_y;
+          norm(&out->swing_dir.x,
+               &out->swing_dir.y);
+        }
+        return 1;
+      }
+    }
   }
   return 0;
 }
@@ -1156,7 +1208,7 @@ static void host_tick(Env *env) {
     };
 
     /* did you swipe our shooty thingy!? */
-    if (host_ent_sword_collision(env, shooty))
+    if (host_ent_sword_collision(env, shooty, NULL))
       ts->dead_after_cycle[fb_i] = (int)cycle-1;
 
     fb_i++;
@@ -1304,7 +1356,8 @@ static void host_tick(Env *env) {
         }
 
         /* let's reevaluate after a bit, though */ 
-        if (action_dist > map_tile_world_size) action_dist = map_tile_world_size;
+        if (action_dist >  map_tile_world_size) action_dist =  map_tile_world_size;
+        if (action_dist < -map_tile_world_size) action_dist = -map_tile_world_size;
 
         double SECS_PER_PIXEL = WAIT / map_tile_world_size;
 
@@ -1322,6 +1375,7 @@ static void host_tick(Env *env) {
         fbe->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
         fbe->kind = EntKind_Alive;
 
+        /* bullets hitting stuff is cool */
         HostEntEntCollisionState heecs = { .env = env, .collider = fbe };
         while (host_ent_ent_collision(&heecs)) {
           HostEnt *hit = host_ent_get(env, heecs.hit_id);
@@ -1355,11 +1409,43 @@ static void host_tick(Env *env) {
 
     }
 
+    /* if you hit a wall, rethink your life */
+    int dead = sm->state == SawMinionState_Dead;
+    if (!dead && host_ent_tile_collision(env, map, sme)) {
+      sm->state = SawMinionState_Think;
+
+      sm->pos_state_start.x = sme->x;
+      sm->pos_state_start.y = sme->y;
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + WAIT;
+    }
+
     /* did you swipe our saw minion!? */
-    if (host_ent_sword_collision(env, sme)) {
+    int damagable = !dead && sm->ts_no_damage_til < env->ts();
+    HostEntSwordCollisionOut hesco = {0};
+    if (damagable && host_ent_sword_collision(env, sme, &hesco)) {
       sm->hp -= 1;
       if (sm->hp <= 0)
         sm->state = SawMinionState_Dead;
+      else {
+        sm->ts_no_damage_til = env->ts() + 0.3;
+
+        /* knockback! */
+        // float dx = sme->x - hesco.hitter->x;
+        // float dy = sme->y - hesco.hitter->y;
+        // norm(&dx, &dy);
+        float dx = hesco.swing_dir.x;
+        float dy = hesco.swing_dir.y;
+
+        double SECS_PER_PIXEL = (WAIT / (map_tile_world_size * 3));
+        float action_dist = map_tile_world_size;
+
+        sm->state = SawMinionState_Charge;
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
+        sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
+        sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
+      }
     }
 
     sme->hp = sm->hp;
@@ -1387,7 +1473,7 @@ static void host_tick(Env *env) {
       float dy = hit->y - sme->y;
 
       float dmag = mag(dx, dy);
-      float ideal = player_world_size * 0.3f;
+      float ideal = player_world_size * 0.4f;
       /* we only care if the distance is smaller than our ideal */
       if (dmag > ideal) continue;
       float delta = ideal - dmag;
