@@ -16,14 +16,14 @@ source ~/msvc/setup.sh
 
 # compile DLL -- "wq/wq.c"
 if [[ "dbg" == $1 ]]; then
-	cl //fsanitize=address //Zi //nologo //LD ../wq/wq.c //link //out:wq.dll
+	cl //nologo //Zi //fsanitize=address //LD ../wq/wq.c //link //out:wq.dll
 else 
 	cl //nologo //Zi //O2 //WX //LD ../wq/wq.c //link //out:wq.dll
 fi
 
 # compile host executable -- "main.c"
 if [[ "dbg" == $1 ]]; then
-	cl //fsanitize=address //Zi //nologo ../main.c
+	cl //nologo //Zi //fsanitize=address ../main.c
 else 
 	cl //nologo //Zi //O2 ../main.c
 fi

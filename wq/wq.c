@@ -3,6 +3,7 @@
 
 #define t_begin(str) env->trace_begin((str), sizeof(str))
 #define t_end() env->trace_end()
+#define ARR_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #include "wq.h"
 #include "font.h"
@@ -25,6 +26,7 @@ void *calloc(size_t nmemb, size_t size);
 
 #define MATH_PI  3.141592653589793
 #define MATH_TAU 6.283185307179586
+#define GOLDEN_RATIO (1.61803f)
 
 static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
 
@@ -127,6 +129,14 @@ static inline void norm(float *x, float *y) {
     *x /= m,
     *y /= m;
 }
+static inline void reflect(float *_vx, float *_vy, float nx, float ny) {
+  float vx = *_vx;
+  float vy = *_vy;
+
+  float vdotn = vx*nx + vy*ny;
+  *_vx = vx - (2 * vdotn * nx);
+  *_vy = vy - (2 * vdotn * ny);
+}
 
 typedef struct {
   struct { float x, y; } grip, tip, circ;
@@ -169,12 +179,18 @@ typedef struct {
   int str_rows, str_cols;
 } Map;
 
+// char map_str[] = 
+//   "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+//   "B....B.BvB.BvB.BvB...vBeeeeB\n"
+//   "B..................!h....eee\n"
+//   "B....B^B.B^B.B^B.B...^B.eeeB\n"
+//   "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
 char map_str[] = 
-  "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-  "B....B.BvB.BvB.BvB...vBeeeeB\n"
-  "B..................!h....eee\n"
-  "B....B^B.B^B.B^B.B...^B.eeeB\n"
-  "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
+  "BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+  "B....B.BvB.BvB.BvB...vB.....B\n"
+  "B.....................h!..E.B\n"
+  "B....B^B.B^B.B^B.B...^B.....B\n"
+  "BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
 
 static inline int map_flip_y(Map *map, int y) { return map->tile_size.y - 1 - y; }
 
@@ -276,6 +292,71 @@ typedef struct {
   struct { uint32_t tick_start, tick_end; float dir; } swing;
 } HostEnt;
 
+/* core problem:
+ * the client needs to be able to track server ents across frames,
+ * to do good interpolation and to reuse memory effectively.
+ *
+ * the server wants to generate its ents from scratch each frame,
+ * because it makes gameplay code easier to write.
+ * (ex: no entity lifetime management, just code)
+ * (ex: no compulsion to store all state in generic Ent,
+ *      write your specific gameplay logic for this part of the map, that's fine!)
+ *
+ * old solution (simple but worked!):
+ * have a scratch_id that you increment each time you need a new ent
+ * if you spawn everything in the exact same order each frame, you're fine.
+ * - nothing can just _not be spawned_
+ * - nothing can be spawned in a different order
+ * - reiterating over the same batches of entities is annoying
+ * - (store where scratch_id is, where it was when we stopped pushing, etc.)
+ *
+ * current solution (just a lil more complicated >:) ):
+ * the server still stores state across frames to track your ent.
+ * you could generate random numbers for each ent on init, and store them
+ * in that struct, ... but maybe even that much bookkeeping isn't necessary.
+ * why not simply map those fixed memory addresses to ids the client can
+ * use for its interpolation?
+ * - you can just not spawn if you want, that Ent will stay zeroed
+ * - you can spawn in whatever order you want, id will be the same
+ *   (your memory didn't move!)
+ * - iterating over state and getting entities is trivial
+ *   (no juggling scratch_id to know what this state's entity is)
+ *
+ * possible optimization:
+ *  - These tables are used for individual levels.
+ *  - All of the level's state, that you're using pointers into
+ *    to get unique, persistent data, occupies the same struct.
+ *  - You don't need to put the pointers into a hash map.
+ *  - Just subtract from the address of the beginning of the level's
+ *    state, and index directly. It's a small enough range that you
+ *    can probably allocate a sufficiently large buffer.
+ *    (or even skip this indirection and reserve that many Ents)
+ */
+typedef struct {
+  uint32_t ent_id_offset;
+  void *pointer_offset;
+  size_t table[100];
+} EntIdTable;
+static EntId eit_p(EntIdTable *eit, void *p) {
+  size_t pi = (uint8_t *)p - (uint8_t *)eit->pointer_offset;
+
+  int LEN = sizeof(eit->table) / sizeof(eit->table[0]);
+  for (int i = 0; i < LEN; i++)
+    if (eit->table[i] == pi)
+      return eit->ent_id_offset + i;
+
+  for (int i = 0; i < LEN; i++)
+    if (eit->table[i] == 0) {
+      eit->table[i] = pi;
+      return eit->ent_id_offset + i;
+    }
+
+  /* TODO: something here */
+  // assert(0); // EntIdTable exhausted
+  return -9999;
+}
+static EntId eit_pi(EntIdTable *eit, void *p, int i) { return eit_p(eit, (uint8_t *)p + i); }
+
 typedef struct {
   char looks;
   float x, y;
@@ -292,6 +373,7 @@ typedef struct {
   uint16_t hp, max_hp;
 } EntUpd;
 
+/* - sawmill - */
 typedef enum {
   SawMinionState_Init,
   SawMinionState_Think,
@@ -302,18 +384,61 @@ typedef enum {
 typedef struct {
   SawMinionState state;
   uint16_t hp;
-  double ts_no_damage_til, ts_state_start, ts_state_end;
+  double ts_state_start, ts_state_end;
   struct { float x, y; } pos_state_start,
                          pos_state_end; /* <- meaning depends on state */
 } SawMinion;
 
+/* -- saw master -- */
+typedef enum {
+  BouncySawState_Init,
+  BouncySawState_Going,
+  BouncySawState_Gone,
+} BouncySawState;
 typedef struct {
+  BouncySawState state;
+  uint32_t tick_no_hurt_till;
+  struct { float x, y; } pos, vel;
+} BouncySaw; 
+typedef enum {
+  SawMasterState_Waiting,
+  SawMasterState_Blink,
+  SawMasterState_WaveStart,
+  SawMasterState_BouncySaw,
+  SawMasterState_MinionWave,
+  SawMasterState_Damageable,
+  SawMasterState_Defeated,
+} SawMasterState;
+typedef struct {
+  SawMasterState state;
+  double ts_state_start, ts_state_end;
+  int times_killed;
+
+  /* SawMasterState_BouncySaw */ int saws_launched, saws_to_launch;
+  /* SawMasterState_Damageable */ int hp, max_hp;
+
+  int bouncy_saw_count;
+  BouncySaw bouncy_saws[10];
+
+  int minion_count;
+  SawMinion minions[10];
+} SawMaster;
+/* -- saw master -- */
+
+typedef struct {
+  Map map;
+
+  EntIdTable eit;
+  uint8_t sword_collected;
+
   uint32_t dead_on_cycle[10];
   uint32_t dead_after_cycle[10];
-  uint8_t sword_collected;
   SawMinion saw_minions[10];
+  SawMaster saw_master;
 } TutorialState;
+/* - sawmill - */
 
+typedef struct { uint32_t tick_until; EntId dealt_by, dealt_to; } HitTableEntry;
 /* client ents are basically just a networking abstraction
  * to track a moving thing and maybe make it look good
  *
@@ -356,6 +481,8 @@ typedef struct {
     int next_ent;
 
     TutorialState tutorial;
+
+    HitTableEntry hit_table[100];
   } host;
 
 } State;
@@ -370,7 +497,7 @@ static State *state(Env *env) {
     /* --- init state --- */
     for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
 
-    state(env)->host.next_ent += 100; /* i need some scratch ents for my mad hax */
+    state(env)->host.next_ent += 150; /* i need some scratch ents for my mad hax */
     /* lol tick 0 is special because lazy */
     state(env)->host.tick_count = 1;
 
@@ -880,6 +1007,44 @@ static EntId host_ent_next(Env *env) {
 static HostEnt *host_ent_get(Env *env, EntId id) {
   return state(env)->host.ents + id;
 }
+static EntId host_ent_id(Env *env, HostEnt *e) {
+  return e - state(env)->host.ents;
+}
+
+/* how many ticks in a second? */
+#define TICK_SECOND (20)
+
+/* basically, debounces hits.
+ * returns 0 if already present, inserts and returns 1 otherwise */
+#define HIT_TABLE_ENTRY_DURATION_TICKS (TICK_SECOND * 0.1)
+static int host_hit_table_debounce(Env *env, EntId dealt_by, EntId dealt_to) {
+  State *s = state(env);
+  uint32_t tick = s->host.tick_count;
+
+  for (int i = 0; i < ARR_LEN(s->host.hit_table); i++) {
+    HitTableEntry *hte = s->host.hit_table + i;
+    if (hte->tick_until < tick) continue;
+
+    if (hte->dealt_by == dealt_by && hte->dealt_to == dealt_to )
+      return 0;
+  }
+
+  for (int i = 0; i < ARR_LEN(s->host.hit_table); i++) {
+    HitTableEntry *hte = s->host.hit_table + i;
+
+    if (hte->tick_until < tick) {
+      *hte = (HitTableEntry) {
+        .dealt_by = dealt_by,
+        .dealt_to = dealt_to,
+        .tick_until = tick + HIT_TABLE_ENTRY_DURATION_TICKS,
+      };
+      return 1;
+    }
+  }
+
+  /* TODO: oh boy */
+  return 0;
+}
 
 /* to client */
 typedef enum {
@@ -936,7 +1101,10 @@ static int host_ent_ent_collision(HostEntEntCollisionState *heecs) {
   return 0;
 }
 
-static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e) {
+typedef struct {
+  struct { int x, y; } normal;
+} HostEntTileCollisionOut;
+static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e, HostEntTileCollisionOut *out) {
   float ex = e->x;
   float ey = e->y;
 
@@ -960,6 +1128,7 @@ static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e) {
 
   /* find closest empty tile */
   int empty_tx = -1, empty_ty = -1;
+  int best_offset_i = -1;
   float best_dist = 1e9;
   for (int i = 0; i < sizeof(offsets)/sizeof(offsets[0]); i++) {
 
@@ -980,12 +1149,14 @@ static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e) {
     float dist = mag(dx, dy);
 
     if (dist < best_dist) {
+      best_offset_i = i;
       best_dist = dist;
       empty_tx = tx;
       empty_ty = ty;
     }
   }
 
+  /* i hate it when the nearest empty tile doesn't exist */
   if (!map_in_bounds(map, empty_tx, empty_ty))
     e->x = e->y = 0.0f;
   else {
@@ -1001,6 +1172,10 @@ static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e) {
     float he =  map_tile_world_size/2;
     if (fabsf(dx) > he) hit = 1, e->x = cx + he * signf(dx);
     if (fabsf(dy) > he) hit = 1, e->y = cy + he * signf(dy);
+
+    if (hit && out)
+      out->normal.x = offsets[best_offset_i].x,
+      out->normal.y = offsets[best_offset_i].y;
     return hit;
   }
   return 0;
@@ -1077,21 +1252,35 @@ static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionO
           norm(&out->swing_dir.x,
                &out->swing_dir.y);
         }
-        return 1;
+        EntId p_id = host_ent_id(env, p);
+        EntId e_id = host_ent_id(env, e);
+        return host_hit_table_debounce(env, p_id, e_id);
       }
     }
   }
   return 0;
 }
 
-/* how many ticks in a second? */
-#define TICK_SECOND (20)
+static int ts_ent_hurt_player(Env *env, HostEnt *collider) {
+  HostEntEntCollisionState heecs = { .env = env, .collider = collider };
+  while (host_ent_ent_collision(&heecs)) {
+    HostEnt *hit = host_ent_get(env, heecs.hit_id);
+    if (hit->is_player) {
+      hit->hp -= 1;
+      if (hit->hp <= 0)
+        hit->hp = hit->max_hp,
+        hit->x = hit->y = 0.0f;
+      return 1;
+    }
+  }
+  return 0;
+}
 
 static void ts_sword(Env *env, TutorialState *ts, EntId sword_id) {
   HostEnt *sword = host_ent_get(env, sword_id);
   *sword = (HostEnt) {0};
 
-  Map *map = &state(env)->map;
+  Map *map = &ts->map;
   MapIter mi = { .map = map };
   if (map_iter(&mi, '!')) {
     /* pos is center of the tile */
@@ -1117,9 +1306,287 @@ static void ts_sword(Env *env, TutorialState *ts, EntId sword_id) {
   }
 }
 
+static void ts_bouncy_saw_tick(Env *env, TutorialState *ts, BouncySaw *bs) {
+  HostEnt *bse = host_ent_get(env, eit_p(&ts->eit, bs));
+  *bse = (HostEnt) { .kind = EntKind_Limbo, .looks = 'O' };
+  switch (bs->state) {
+
+    case (BouncySawState_Init): {
+      bs->state = BouncySawState_Going;
+    } break;
+
+    case (BouncySawState_Going): {
+      bse->kind = EntKind_Alive;
+      bse->x = bs->pos.x += bs->vel.x * 4.2f;
+      bse->y = bs->pos.y += bs->vel.y * 4.2f;
+
+      HostEntTileCollisionOut hetco = {0};
+      if (host_ent_tile_collision(env, &ts->map, bse, &hetco)) {
+        reflect(&bs->vel.x,
+                &bs->vel.y,
+                            hetco.normal.x,
+                            hetco.normal.y);
+        norm(&bs->vel.x,
+             &bs->vel.y);
+      }
+
+      /* ouch! tears clear through ya */
+      uint32_t tick = state(env)->host.tick_count;
+      int can_hurt = bs->tick_no_hurt_till <= tick;
+      if (can_hurt && ts_ent_hurt_player(env, bse))
+        bs->tick_no_hurt_till = tick + TICK_SECOND/2;
+    } break;
+
+    case (BouncySawState_Gone): {
+      /* ??? */
+    } break;
+
+  }
+}
+
+static void nearest_player(
+    Env *env,
+    float x, float y,
+    float *_best_dist, EntId *_best_target_id
+) {
+  float best_dist = _best_dist ? *_best_dist : 1e9;
+
+  for (int i = 0; i < WQ_ENTS_MAX; i++) {
+    HostEnt *e = state(env)->host.ents + i;
+    if (e->kind <= EntKind_Limbo) continue;
+    if (!e->is_player) continue;
+
+    float dist = mag(e->x - x,
+                     e->y - y);
+    if (dist < best_dist) {
+      if (_best_dist     ) *_best_dist      = dist;
+      if (_best_target_id) *_best_target_id = i;
+    }
+  }
+}
+
+typedef struct {
+  Env *env;
+  TutorialState *ts;
+  float init_x, init_y;
+  int sm_i;
+} TsSawMinionTickIn;
+static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
+  Env *env = in->env;
+  Map *map = &in->ts->map;
+  EntIdTable *eit = &in->ts->eit;
+  int sm_i = in->sm_i;
+
+  HostEnt *sme = host_ent_get(env, eit_p(eit, sm));
+  *sme = (HostEnt) { .kind = EntKind_Alive, .looks = 'e' };
+
+  HostEnt *fbe = host_ent_get(env, eit_pi(eit, sm, 1));
+  *fbe = (HostEnt) { .kind = EntKind_Limbo, .looks = 'o' };
+
+  int SAW_MINION_MAX_HP = 2;
+
+  double WAIT = 0.8;
+  float ATTACK_DIST_MIN = player_world_size * 1.25;
+  float ATTACK_DIST_MAX = map_tile_world_size;
+  float t = (sm->state == SawMinionState_Init)
+    ? 0
+    : inv_lerp(sm->ts_state_start, sm->ts_state_end, env->ts());
+  if (t > 1) t = 1;
+
+  switch (sm->state) {
+
+    case (SawMinionState_Init): {
+      /* saw minion is at tile center */
+      float ox = in->init_x;
+      float oy = in->init_y;
+
+      sme->x = sm->pos_state_start.x = ox;
+      sme->y = sm->pos_state_start.y = oy;
+
+      sm->hp = SAW_MINION_MAX_HP;
+      sm->state = SawMinionState_Think;
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + WAIT;
+    } break;
+
+    case (SawMinionState_Dead): {
+      sme->kind = EntKind_Limbo;
+    } break;
+
+    case (SawMinionState_Think): {
+      sme->x = sm->pos_state_start.x;
+      sme->y = sm->pos_state_start.y;
+
+      if (t < 1.0) break;
+
+      /* find nearest player in ent list */
+      float best_dist = 3 * map_tile_world_size;
+      EntId best_target_id = -1;
+      nearest_player(env, sme->x, sme->y, &best_dist, &best_target_id);
+      if (best_target_id == -1) break;
+      HostEnt *best_target = host_ent_get(env, best_target_id);
+
+      /* fuzz target slightly to distribute minions on ring around player */
+      float ring_size = best_dist * 0.3f;
+      if (ring_size < ATTACK_DIST_MIN) ring_size = ATTACK_DIST_MIN;
+
+      /* golden ratio should give us evenish ring distribution around target */
+      float target_x = best_target->x + cosf(GOLDEN_RATIO*sm_i) * ring_size;
+      float target_y = best_target->y + sinf(GOLDEN_RATIO*sm_i) * ring_size;
+      float dx = target_x - sme->x;
+      float dy = target_y - sme->y;
+      best_dist = mag(dx, dy);
+      norm(&dx, &dy);
+
+      /* move/shoot dist */
+      float action_dist = map_tile_world_size;
+
+      float adt = inv_lerp(ATTACK_DIST_MIN, ATTACK_DIST_MAX, best_dist);
+      /* great, we're the proper distance away to attack */
+      if (adt >= 0 && adt <= 1.0f) {
+        sm->state = SawMinionState_Attack;
+
+        /* make sure to actually shoot the player */
+        dx = best_target->x - sme->x;
+        dy = best_target->y - sme->y;
+        norm(&dx, &dy);
+      }
+      else {
+        sm->state = SawMinionState_Charge;
+
+        float ideal = (adt < 0) ? ATTACK_DIST_MIN : ATTACK_DIST_MAX;
+
+        /* in which direction and how far do we need to go to get to ideal? */
+        /* ex: we need to back up, ideal is MIN, best_dist is slightly under.
+         * this will be negative, which makes sense! */
+        float delta = best_dist - ideal;
+        action_dist = delta;
+      }
+
+      /* let's reevaluate after a bit, though */ 
+      if (action_dist >  map_tile_world_size) action_dist =  map_tile_world_size;
+      if (action_dist < -map_tile_world_size) action_dist = -map_tile_world_size;
+
+      double SECS_PER_PIXEL = WAIT / map_tile_world_size;
+
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
+      sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
+      sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
+    } break;
+
+    case (SawMinionState_Attack): {
+      sme->x = sm->pos_state_start.x;
+      sme->y = sm->pos_state_start.y;
+
+      fbe->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
+      fbe->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
+      fbe->kind = EntKind_Alive;
+
+      /* bullets hitting stuff is cool */
+      if (ts_ent_hurt_player(env, fbe))
+        sm->state = SawMinionState_Think;
+
+      if (t < 1.0) break;
+      sm->state = SawMinionState_Think;
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + WAIT;
+    } break;
+
+    case (SawMinionState_Charge): {
+      sme->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
+      sme->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
+
+      if (t < 1.0) break;
+      sm->state = SawMinionState_Think;
+      sm->pos_state_start.x = sm->pos_state_end.x;
+      sm->pos_state_start.y = sm->pos_state_end.y;
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + WAIT;
+    } break;
+
+  }
+
+  /* if you hit a wall, rethink your life */
+  int dead = sm->state == SawMinionState_Dead;
+  if (!dead && host_ent_tile_collision(env, map, sme, NULL)) {
+    sm->state = SawMinionState_Think;
+
+    sm->pos_state_start.x = sme->x;
+    sm->pos_state_start.y = sme->y;
+    sm->ts_state_start = env->ts();
+    sm->ts_state_end   = env->ts() + WAIT;
+  }
+
+  /* did you swipe our saw minion!? */
+  int damagable = !dead;
+  HostEntSwordCollisionOut hesco = {0};
+  if (damagable && host_ent_sword_collision(env, sme, &hesco)) {
+    sm->hp -= 1;
+    if (sm->hp <= 0)
+      sm->state = SawMinionState_Dead;
+    else {
+      /* knockback! */
+      // float dx = sme->x - hesco.hitter->x;
+      // float dy = sme->y - hesco.hitter->y;
+      // norm(&dx, &dy);
+      float dx = hesco.swing_dir.x;
+      float dy = hesco.swing_dir.y;
+
+      double SECS_PER_PIXEL = (WAIT / (map_tile_world_size * 3));
+      float action_dist = map_tile_world_size;
+
+      sm->state = SawMinionState_Charge;
+      sm->ts_state_start = env->ts();
+      sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
+      sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
+      sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
+    }
+  }
+
+  sme->hp = sm->hp;
+  sme->max_hp = SAW_MINION_MAX_HP;
+}
+
+static void ts_saw_minion_tick_collision_pass(Env *env, TutorialState *ts, SawMinion sms[], int count) {
+  EntIdTable *eit = &ts->eit;
+  Map *map = &ts->map;
+
+  for (int sm_i = 0; sm_i < count; sm_i++) {
+    HostEnt *sme = host_ent_get(env, eit_p(eit, sms + sm_i));
+
+    HostEntEntCollisionState heecs = { .env = env, .collider = sme };
+    while (host_ent_ent_collision(&heecs)) {
+      HostEnt *hit = host_ent_get(env, heecs.hit_id);
+
+      /* you can only collide with other saw minions */
+      for (int i = 0; i < count; i++) {
+        if (eit_p(eit, sms + i) == heecs.hit_id)
+          goto SAW_MINION_IDENTIFIED;
+      }
+      continue;
+  SAW_MINION_IDENTIFIED:
+
+      float dx = hit->x - sme->x;
+      float dy = hit->y - sme->y;
+
+      float dmag = mag(dx, dy);
+      float ideal = player_world_size * 0.4f;
+      /* we only care if the distance is smaller than our ideal */
+      if (dmag > ideal) continue;
+      float delta = ideal - dmag;
+
+      norm(&dx, &dy);
+      sme->x -= dx * delta/2;
+      sme->y -= dy * delta/2;
+      hit->x += dx * delta/2;
+      hit->y += dy * delta/2;
+    }
+  }
+}
+
 static void host_tick(Env *env) {
   State *s = state(env);
-  Map *map = &s->map;
 
   uint32_t tick = s->host.tick_count;
   double sec = (double)tick / (double)TICK_SECOND;
@@ -1135,6 +1602,16 @@ static void host_tick(Env *env) {
     .y = sinf(env->ts()) * 50,
   };
 
+  /* tutorial level logic */
+  TutorialState *ts = &s->host.tutorial;
+  EntIdTable *eit = &ts->eit;
+  eit->pointer_offset = ts;
+  eit->ent_id_offset = 50;
+
+  /* TODO: make ts authoritative about this */
+  memcpy(&ts->map, &s->map, sizeof(Map));
+  Map *map = &ts->map;
+
   /* move players */
   for (int i = 0; i < CLIENTS_MAX; i++) {
     Client *c = s->host.clients + i;
@@ -1143,8 +1620,10 @@ static void host_tick(Env *env) {
     /* apply Client velocity */
     host_ent_get(env, c->pc)->x += c->vel.x * 6.0f;
     host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
-    host_ent_tile_collision(env, map, host_ent_get(env, c->pc));
+    host_ent_tile_collision(env, map, host_ent_get(env, c->pc), NULL);
   }
+
+  ts_sword(env, ts, eit_p(eit, &ts->sword_collected));
 
   /* find range of X axis values occupied by shooty thingies */
   int shooter_min_x = 1e9, shooter_max_x = 0;
@@ -1156,11 +1635,8 @@ static void host_tick(Env *env) {
     if (mi.tx > shooter_max_x) shooter_max_x = mi.tx;
   }
 
-  /* tutorial level logic */
-  TutorialState *ts = &s->host.tutorial;
-
-  ts_sword(env, ts, scratch_id++);
-
+  /* "fireballs" (saws in saw frogger) first pass
+   * TODO: get off of scratch_id, to EIT */
   int fb_i = 0;
   int fb_id0 = scratch_id;
   mi = (MapIter) { .map = map };
@@ -1234,7 +1710,7 @@ static void host_tick(Env *env) {
 
     if (alive) {
       /* hit tile = ded */
-      if (host_ent_tile_collision(env, map, fb))
+      if (host_ent_tile_collision(env, map, fb, NULL))
         ts->dead_on_cycle[fb_i] = (int)cycle;
 
       /* hit player = ouch */
@@ -1254,237 +1730,178 @@ static void host_tick(Env *env) {
     fb_i++;
   }
 
-  /* saw minions */
+  /* saw master */
   mi = (MapIter) { .map = map };
-  int sme_id0 = scratch_id;
-  int sm_id = 0;
-  while (map_iter(&mi, 'e')) {
-    HostEnt *sme = host_ent_get(env, scratch_id++);
-    *sme = (HostEnt) { .kind = EntKind_Alive, .looks = 'e' };
-    SawMinion *sm = ts->saw_minions + sm_id;
+  while (map_iter(&mi, 'E')) {
+    SawMaster *sm = &ts->saw_master;
+    HostEnt *sme = host_ent_get(env, eit_p(eit, sm));
+    *sme = (HostEnt) { .kind = EntKind_Alive, .looks = 'M' };
 
-    HostEnt *fbe = host_ent_get(env, scratch_id++);
-    *fbe = (HostEnt) { .kind = EntKind_Limbo, .looks = 'o' };
+    /* saw master is at tile center */
+    float ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
+    float oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
+    sme->x = ox;
+    sme->y = oy;
 
-    int SAW_MINION_MAX_HP = 2;
-
-    double WAIT = 0.8;
-    float ATTACK_DIST_MIN = player_world_size * 1.25;
-    float ATTACK_DIST_MAX = map_tile_world_size;
-    float t = (sm->state == SawMinionState_Init)
+    float t = (sm->state == 0)
       ? 0
       : inv_lerp(sm->ts_state_start, sm->ts_state_end, env->ts());
-    if (t > 1) t = 1;
+
+    /* TODO: animation after death where all minions get sucked in */
+    /* bump up the health
+     * add more rooms with just minions
+     * health potions? */
+
+    /* "polish"
+     * - particle effects on damage taken/dealt
+     * - screen shake durring M mode
+     * - red tint on low hp */
 
     switch (sm->state) {
+      case (SawMasterState_Waiting): {
+        float best_dist = 1e9;
+        nearest_player(env, sme->x, sme->y, &best_dist, NULL);
 
-      case (SawMinionState_Init): {
-        /* saw minion is at tile center */
-        float ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-        float oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-
-        sme->x = sm->pos_state_start.x = ox;
-        sme->y = sm->pos_state_start.y = oy;
-
-        sm->hp = SAW_MINION_MAX_HP;
-        sm->state = SawMinionState_Think;
-        sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + WAIT;
+        if (best_dist < 3*map_tile_world_size)
+          sm->state = SawMasterState_WaveStart;
       } break;
 
-      case (SawMinionState_Dead): {
-        sme->kind = EntKind_Limbo;
-      } break;
-
-      case (SawMinionState_Think): {
-        sme->x = sm->pos_state_start.x;
-        sme->y = sm->pos_state_start.y;
+      case (SawMasterState_Blink): {
+        sme->kind = ((int)(env->ts() * 1000)/20 % 2) ? EntKind_Limbo : EntKind_Alive;
 
         if (t < 1.0) break;
-
-        /* find nearest player in ent list */
-        float best_dist = 3 * map_tile_world_size;
-        HostEnt *best_target = NULL;
-        for (int i = 0; i < WQ_ENTS_MAX; i++) {
-          HostEnt *e = state(env)->host.ents + i;
-          if (e->kind <= EntKind_Limbo) continue;
-          if (!e->is_player) continue;
-
-          float dist = mag(e->x - sme->x,
-                           e->y - sme->y);
-          if (dist < best_dist)
-            best_dist = dist,
-            best_target = e;
-        }
-        if (best_target == NULL) break;
-
-        /* fuzz target slightly to distribute minions on ring around player */
-        float ring_size = best_dist * 0.3f;
-        if (ring_size < ATTACK_DIST_MIN) ring_size = ATTACK_DIST_MIN;
-
-        float GOLDEN_RATIO = 1.61803f;
-        float target_x = best_target->x + cosf(GOLDEN_RATIO*sm_id) * ring_size;
-        float target_y = best_target->y + sinf(GOLDEN_RATIO*sm_id) * ring_size;
-        float dx = target_x - sme->x;
-        float dy = target_y - sme->y;
-        best_dist = mag(dx, dy);
-        norm(&dx, &dy);
-
-        /* move/shoot dist */
-        float action_dist = map_tile_world_size;
-
-        float adt = inv_lerp(ATTACK_DIST_MIN, ATTACK_DIST_MAX, best_dist);
-        /* great, we're the proper distance away to attack */
-        if (adt >= 0 && adt <= 1.0f) {
-          sm->state = SawMinionState_Attack;
-
-          /* make sure to actually shoot the player */
-          dx = best_target->x - sme->x;
-          dy = best_target->y - sme->y;
-          norm(&dx, &dy);
-        }
-        else {
-          sm->state = SawMinionState_Charge;
-
-          float ideal = (adt < 0) ? ATTACK_DIST_MIN : ATTACK_DIST_MAX;
-
-          /* in which direction and how far do we need to go to get to ideal? */
-          /* ex: we need to back up, ideal is MIN, best_dist is slightly under.
-           * this will be negative, which makes sense! */
-          float delta = best_dist - ideal;
-          action_dist = delta;
-        }
-
-        /* let's reevaluate after a bit, though */ 
-        if (action_dist >  map_tile_world_size) action_dist =  map_tile_world_size;
-        if (action_dist < -map_tile_world_size) action_dist = -map_tile_world_size;
-
-        double SECS_PER_PIXEL = WAIT / map_tile_world_size;
-
-        sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
-        sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
-        sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
+        sm->state = (sm->times_killed >= 3)
+          ? SawMasterState_Defeated
+          : SawMasterState_WaveStart;
       } break;
 
-      case (SawMinionState_Attack): {
-        sme->x = sm->pos_state_start.x;
-        sme->y = sm->pos_state_start.y;
+      case (SawMasterState_WaveStart): {
+        /* uhhh ... TODO: structify these? */
+        sm->bouncy_saw_count = 0;
+        memset(sm->bouncy_saws, 0, sizeof(sm->bouncy_saws));
+        sm->minion_count = 0;
+        memset(sm->minions, 0, sizeof(sm->minions));
 
-        fbe->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
-        fbe->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
-        fbe->kind = EntKind_Alive;
+        sm->state = SawMasterState_BouncySaw;
+        sm->saws_launched = 0;
+        sm->saws_to_launch = (1 + sm->times_killed) * 3;
+        sm->ts_state_start = env->ts();
+        sm->ts_state_end   = env->ts() + 0.5f;
+      } break;
 
-        /* bullets hitting stuff is cool */
-        HostEntEntCollisionState heecs = { .env = env, .collider = fbe };
-        while (host_ent_ent_collision(&heecs)) {
-          HostEnt *hit = host_ent_get(env, heecs.hit_id);
-          if (hit->is_player) {
-            hit->hp -= 1;
-            if (hit->hp <= 0)
-              hit->hp = hit->max_hp,
-              hit->x = hit->y = 0.0f;
-
-            sm->state = SawMinionState_Think;
-          }
-        }
-
+      case (SawMasterState_BouncySaw): {
         if (t < 1.0) break;
-        sm->state = SawMinionState_Think;
+
+        BouncySaw *bs = sm->bouncy_saws + sm->bouncy_saw_count;
+        float r = (float)sm->saws_launched / (float)sm->saws_to_launch;
+        // bs->vel.x = cosf(r * 0.1f + env->ts());
+        // bs->vel.y = sinf(r * 0.1f + env->ts());
+        bs->vel.x = cosf(r * MATH_TAU + 0.854f);
+        bs->vel.y = sinf(r * MATH_TAU + 0.854f);
+        bs->pos.x = ox;
+        bs->pos.y = oy;
+
+        sm->bouncy_saw_count++;
+        sm->saws_launched++;
+
+        if (sm->saws_launched == sm->saws_to_launch) {
+          sm->state = SawMasterState_MinionWave;
+          sm->ts_state_start = env->ts();
+          sm->ts_state_end   = env->ts() + 1.4f;
+          break;
+        }
+
         sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + WAIT;
+        sm->ts_state_end   = env->ts() + 0.08f + 0.7f*!(sm->saws_launched%2);
       } break;
 
-      case (SawMinionState_Charge): {
-        sme->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
-        sme->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
-
+      case (SawMasterState_MinionWave): {
         if (t < 1.0) break;
-        sm->state = SawMinionState_Think;
-        sm->pos_state_start.x = sm->pos_state_end.x;
-        sm->pos_state_start.y = sm->pos_state_end.y;
+
+        sm->minion_count++;
+
+        if (sm->minion_count == (2 + sm->times_killed)) {
+          sm->hp = sm->max_hp = 4;
+          sm->ts_state_start = env->ts();
+          sm->ts_state_end   = env->ts() + 0.5f;
+          sm->state = SawMasterState_Damageable;
+          break;
+        }
         sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + WAIT;
+        sm->ts_state_end   = env->ts() + 0.3f + 0.07f * sm->minion_count;
       } break;
 
+      case (SawMasterState_Damageable): {
+        if (t < 1.0f) break;
+
+        sme->looks = 'E';
+
+        /* ouchy y u hurty saw master */
+        if (host_ent_sword_collision(env, sme, NULL) && --sm->hp == 0) {
+          sm->times_killed++;
+
+          sm->ts_state_start = env->ts();
+          sm->ts_state_end   = env->ts() + 0.8f*sm->times_killed;
+          sm->state = SawMasterState_Blink;
+          break;
+        }
+
+        /* so it shows up on the screen idk */
+        sme->    hp = sm->    hp;
+        sme->max_hp = sm->max_hp;
+      } break;
+
+      case (SawMasterState_Defeated): {
+        sm->bouncy_saw_count = 0;
+        sm->minion_count = 0;
+        sme->looks = '.';
+      } break;
     }
 
-    /* if you hit a wall, rethink your life */
-    int dead = sm->state == SawMinionState_Dead;
-    if (!dead && host_ent_tile_collision(env, map, sme)) {
-      sm->state = SawMinionState_Think;
+    /* no comment (look it works ok) */
+    {
+      /* bouncy saws */
+      for (int i = 0; i < ARR_LEN(sm->bouncy_saws); i++)
+        *host_ent_get(env, eit_p(eit, sm->bouncy_saws + i)) =
+          (HostEnt) { .kind = EntKind_Limbo };
 
-      sm->pos_state_start.x = sme->x;
-      sm->pos_state_start.y = sme->y;
-      sm->ts_state_start = env->ts();
-      sm->ts_state_end   = env->ts() + WAIT;
+      /* saw minions */
+      for (int i = 0; i < ARR_LEN(sm->minions); i++)
+        *host_ent_get(env, eit_p (eit, sm->minions + i)) =
+          (HostEnt) { .kind = EntKind_Limbo },
+        *host_ent_get(env, eit_pi(eit, sm->minions + i, 1)) =
+          (HostEnt) { .kind = EntKind_Limbo };
     }
 
-    /* did you swipe our saw minion!? */
-    int damagable = !dead && sm->ts_no_damage_til < env->ts();
-    HostEntSwordCollisionOut hesco = {0};
-    if (damagable && host_ent_sword_collision(env, sme, &hesco)) {
-      sm->hp -= 1;
-      if (sm->hp <= 0)
-        sm->state = SawMinionState_Dead;
-      else {
-        sm->ts_no_damage_til = env->ts() + 0.3;
+    /* bouncy saws */
+    for (int i = 0; i < sm->bouncy_saw_count; i++)
+      ts_bouncy_saw_tick(env, ts, sm->bouncy_saws + i);
 
-        /* knockback! */
-        // float dx = sme->x - hesco.hitter->x;
-        // float dy = sme->y - hesco.hitter->y;
-        // norm(&dx, &dy);
-        float dx = hesco.swing_dir.x;
-        float dy = hesco.swing_dir.y;
-
-        double SECS_PER_PIXEL = (WAIT / (map_tile_world_size * 3));
-        float action_dist = map_tile_world_size;
-
-        sm->state = SawMinionState_Charge;
-        sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + (double)action_dist * SECS_PER_PIXEL;
-        sm->pos_state_end.x = sm->pos_state_start.x + dx*action_dist;
-        sm->pos_state_end.y = sm->pos_state_start.y + dy*action_dist;
-      }
+    /* saw minions */
+    for (int i = 0; i < sm->minion_count; i++) {
+      float r = (float)i/(float)sm->minion_count;
+      float dist = map_tile_world_size * (0.6f + r * 0.4f);
+      ts_saw_minion_tick(sm->minions + i, &(TsSawMinionTickIn) {
+        .env = env, .ts = ts, .sm_i = i,
+        .init_x = ox + cosf(i * GOLDEN_RATIO + 0.183f) * dist,
+        .init_y = oy + sinf(i * GOLDEN_RATIO + 0.183f) * dist 
+      });
     }
 
-    sme->hp = sm->hp;
-    sme->max_hp = SAW_MINION_MAX_HP;
-
-    sm_id++;
+    ts_saw_minion_tick_collision_pass(env, ts,
+                                      ts->saw_minions, sm->minion_count);
   }
 
-  /* saw minion collision resolution pass */
+  /* saw minions */
   mi = (MapIter) { .map = map };
-  int sme_id = sme_id0;
-  int sme_ids_count = scratch_id - sme_id0;
-  while (map_iter(&mi, 'e')) {
-    HostEnt *sme = host_ent_get(env, sme_id++);
-    HostEnt *_fbe = host_ent_get(env, sme_id++);
-
-    HostEntEntCollisionState heecs = { .env = env, .collider = sme };
-    while (host_ent_ent_collision(&heecs)) {
-      HostEnt *hit = host_ent_get(env, heecs.hit_id);
-
-      int i = sme_id0 - heecs.hit_id;
-      if (i > sme_ids_count || i % 2) continue;
-
-      float dx = hit->x - sme->x;
-      float dy = hit->y - sme->y;
-
-      float dmag = mag(dx, dy);
-      float ideal = player_world_size * 0.4f;
-      /* we only care if the distance is smaller than our ideal */
-      if (dmag > ideal) continue;
-      float delta = ideal - dmag;
-
-      norm(&dx, &dy);
-      sme->x -= dx * delta/2;
-      sme->y -= dy * delta/2;
-      hit->x += dx * delta/2;
-      hit->y += dy * delta/2;
-    }
-  }
+  int sm_count = 0; 
+  for (; map_iter(&mi, 'e'); sm_count++)
+    ts_saw_minion_tick(ts->saw_minions + sm_count, &(TsSawMinionTickIn) {
+      .env = env, .ts = ts, .sm_i = sm_count,
+      .init_x = map_x_to_world(map, mi.tx) + map_tile_world_size/2,
+      .init_y = map_y_to_world(map, mi.ty) + map_tile_world_size/2
+    });
+  ts_saw_minion_tick_collision_pass(env, ts, ts->saw_minions, sm_count);
 
   /* broadcast to ERRYBUDDY */
   ToClntMsg msg = {
