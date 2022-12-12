@@ -9,11 +9,7 @@
 #include "font.h"
 
 /* TODO: worry about this eventually
- *   https://stackoverflow.com/questions/2782725/converting-float-values-from-big-endian-to-little-endian/2782742#2782742
- * and all the host stuff that uses ts instead of ticks
- * and interpolation
- * multi-room support will need some ironing out (Realm wen?)
- * and Env should be global?
+ * https://stackoverflow.com/questions/2782725/converting-float-values-from-big-endian-to-little-endian/2782742#2782742
  */
  
 /* theoretically part of our contract with our environment but i was lazy */
@@ -28,13 +24,8 @@ void *calloc(size_t nmemb, size_t size);
 
 /* rolling our own math makes it easier to smol WASM, :> */
 
-/* -- mathematical constants -- */
 #define MATH_PI  3.141592653589793
 #define MATH_TAU 6.283185307179586
-/* how long it take to take a swig? */
-#define QUAFF_SECONDS (1.5f)
-/* how long between quaff messages before we cancel your quaff? */
-#define QUAFF_LAPSE (QUAFF_SECONDS/8)
 #define GOLDEN_RATIO (1.61803f)
 
 static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
@@ -150,11 +141,8 @@ static inline void reflect(float *_vx, float *_vy, float nx, float ny) {
 typedef struct {
   struct { float x, y; } grip, tip, circ;
   float radius;
-
-  /* out */
-  struct { float x, y; } closest;
 } LineHitsCircle;
-static int line_hits_circle(LineHitsCircle *lhc) {
+static int line_hits_circle(const LineHitsCircle *lhc) {
   float v_x = lhc->tip.x - lhc->grip.x,
         v_y = lhc->tip.y - lhc->grip.y;
   float line_len = mag(v_x, v_y);
@@ -174,9 +162,6 @@ static int line_hits_circle(LineHitsCircle *lhc) {
   float bridge_y = u_y - sidecar_y;
   float closest = mag(bridge_x, bridge_y);
 
-  lhc->closest.x = lhc->grip.x + v_x * closest;
-  lhc->closest.y = lhc->grip.y + v_y * closest;
-
   return closest <= lhc->radius;
 }
 
@@ -184,16 +169,11 @@ static int line_hits_circle(LineHitsCircle *lhc) {
 /* forward decls */
 static void log(Env *e, char *p);
 
+
 /* --- map --- */
 #define map_tile_world_size (90)
 #define player_world_size (8*4)
-typedef enum {
-  MapKey_Antechamber,
-  MapKey_Tutorial,
-  MapKey_COUNT,
-} MapKey;
 typedef struct {
-  MapKey key;
   struct { float x, y; } world_offset;
   struct {   int x, y; } tile_size;
   int str_rows, str_cols;
@@ -205,27 +185,16 @@ typedef struct {
 //   "B..................!u....eee\n"
 //   "B....B^B.B^B.B^B.B...^B.eeeB\n"
 //   "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
-char *map_strs[MapKey_COUNT] = {
-  [MapKey_Antechamber] = 
-      "BBBBBB\n"
-      "B....B\n"
-      "B.u..B\n"
-      "B..d.B\n"
-      "B....B\n"
-      "BBBBBB\n"
-  ,
-  [MapKey_Tutorial] = 
-    ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-    ".B......Bh..B..........Bhe..B.\n"
-    ".B.E....B.B.Be...B.....BBBB.B.\n"
-    ".B........Be...e.B..........B.\n"
-    ".B....BBBBBBBBBBBBBBBBBB.hB.B.\n"
-    ".BBBBBB.BvB.BvB.BvB...vBBBB.BB\n"
-    ".B.................!.........B\n"
-    ".B.u..B^B.B^B.B^B.B...^B...e.B\n"
-    ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-  ,
-};
+char map_str[] = 
+  ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
+  ".B......Bh..B..........Bhe..B.\n"
+  ".B.E....B.B.Be...B.....BBBB.B.\n"
+  ".B........Be...e.B..........B.\n"
+  ".B....BBBBBBBBBBBBBBBBBB.hB.B.\n"
+  ".BBBBBB.BvB.BvB.BvB...vBBBB.BB\n"
+  ".B.................!.........B\n"
+  ".Bu...B^B.B^B.B^B.B...^B...e.B\n"
+  ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
 
 static inline int map_flip_y(Map *map, int y) { return map->tile_size.y - 1 - y; }
 
@@ -246,7 +215,7 @@ static inline float map_y_to_world(Map *map, float y)
   { return map_flip_y(map, y)*map_tile_world_size - map->world_offset.y; }
 
 static inline char map_index(Map *map, int mx, int my)
-  { return map_strs[map->key][my*map->str_cols + mx]; }
+  { return map_str[my*map->str_cols + mx]; }
 static inline int map_in_bounds(Map *map, int mx, int my) {
   if (mx < 0 || mx >= map->tile_size.x) return 0;
   if (my < 0 || my >= map->tile_size.y) return 0;
@@ -255,10 +224,10 @@ static inline int map_in_bounds(Map *map, int mx, int my) {
 
 typedef struct { Map *map; int tx, ty, i; char c; } MapIter;
 static int map_iter(MapIter *mi, char filter) {
-  while (map_strs[mi->map->key][mi->i]) {
+  while (map_str[mi->i]) {
     mi->tx = mi->i % mi->map->str_cols;
     mi->ty = mi->i / mi->map->str_cols;
-    mi->c = map_strs[mi->map->key][mi->i];
+    mi->c = map_str[mi->i];
     mi->i++;
     if (mi->c == '\n') continue;
     if (!filter || filter == mi->c) return 1;
@@ -267,13 +236,7 @@ static int map_iter(MapIter *mi, char filter) {
   return 0;
 }
 
-static void map_init(Map *map, MapKey key) {
-  memset(map, 0, sizeof(Map));
-
-  map->key = key;
-  char *str = map_strs[map->key];
-  int str_size = strlen(str);
-
+static void map_init(Map *map, char *str, int str_size) {
   int cols = 0;
   while (str[cols] && str[cols] != '\n') cols++;
   map->str_cols = cols + 1; /* newline */
@@ -295,21 +258,13 @@ static void map_init(Map *map, MapKey key) {
 
 
 /* --- persistent State layout --- */
-typedef enum {
-  ClientState_Inactive,
-  ClientState_Play,
-  ClientState_Dead,
-} ClientState;
 typedef uint32_t EntId;
 typedef struct {
+  int active;
   Addr addr;
-
-  ClientState state;
-  uint32_t tick_state_start, tick_state_end;
 
   struct { float x, y; } vel;
   uint16_t hp_pots;
-  uint32_t tick_quaff_earliest, tick_quaff_last;
 
   EntId pc; /* player character's Ent */
 } Client;
@@ -416,27 +371,6 @@ typedef struct {
   struct { double ts_start, ts_end; float dir; } swing;
 } ClntEnt;
 
-/* purpose of this enum:
- * - "name" effect-worthy portions of the gameplay code
- *   e.g. you can use these names for navigation
- * - tell the client to do effects when they occur
- */
-typedef enum {
-  SpurtKind_SparkWedge,
-  SpurtKind_HpPotGulp,
-  SpurtKind_PlayerDies,
-  SpurtKind_HitPlayer,
-  SpurtKind_SawMinionDies,
-  SpurtKind_SawMasterDies,
-  SpurtKind_ShootyThingyAlreadyDead,
-  SpurtKind_COUNT,
-} SpurtKind;
-typedef struct {
-  double ts_start, ts_end;
-  SpurtKind kind;
-  float x, y, angle; /* angle is for wedges */
-} Spurt;
-
 typedef struct {
   char looks;
   float x, y;
@@ -449,7 +383,6 @@ typedef enum {
   SawMinionState_Init,
   SawMinionState_Think,
   SawMinionState_Charge,
-  SawMinionState_Sucking,
   SawMinionState_Attack,
   SawMinionState_Dead,
 } SawMinionState;
@@ -466,18 +399,14 @@ typedef enum {
   BouncySawState_Init,
   BouncySawState_Going,
   BouncySawState_Gone,
-  BouncySawState_Sucking,
 } BouncySawState;
 typedef struct {
   BouncySawState state;
-  double ts_state_start, ts_state_end;
-
   uint32_t tick_no_hurt_till;
   struct { float x, y; } pos, vel;
 } BouncySaw; 
 typedef enum {
   SawMasterState_Waiting,
-  SawMasterState_BlinkSucking,
   SawMasterState_Blink,
   SawMasterState_WaveStart,
   SawMasterState_BouncySaw,
@@ -513,31 +442,7 @@ typedef struct {
   SawMinion saw_minions[10];
   SawMaster saw_master;
 } TutorialState;
-
-typedef struct {
-  Map map;
-
-  EntIdTable eit;
-} AnteState;
-
 /* - sawmill - */
-
-/* -- will probably need eventually, --
- * ... but doesn't achieve stated goal: Mole Level.
-typedef struct Realm Realm;
-typedef struct {
-  size_t size;
-  Realm *next;
-
-  MapKey map;
-  Client *players;
-} RealmHeader;
-struct Realm {
-  Realm *next;
-
-  char data[];
-};
-*/
 
 typedef struct { uint32_t tick_until; EntId dealt_by, dealt_to; } HitTableEntry;
 /* client ents are basically just a networking abstraction
@@ -556,29 +461,21 @@ typedef struct {
   int frametime_ring_index, frametime_ring_len;
   /* --- dbg --- */
 
-  struct {
-    Map map;
+  Map map;
 
-    double ts_last;
+  struct {
     uint32_t last_known_tick;
     
     uint16_t hp_pots;
-    float quaff_prog;
-    double quaff_zero_since;
 
     int am_connected, tries;
     char keysdown[WqVk_MAX];
-
     ClntEnt ents[WQ_ENTS_MAX];
     struct { float x, y; } cam;
     struct { float x, y; } cursor;
 #ifdef VISUALIZE_SWING
     struct { float x, y; } tip, grip;
 #endif
-    uint32_t seed;
-
-    float shake_secs, blood_secs;
-    Spurt spurts[100];
   } clnt;
 
   int am_host;
@@ -591,9 +488,7 @@ typedef struct {
     HostEnt ents[WQ_ENTS_MAX];
     int next_ent;
 
-    MapKey map_key;
     TutorialState tutorial;
-    AnteState ante;
 
     HitTableEntry hit_table[100];
   } host;
@@ -611,26 +506,15 @@ static State *state(Env *env) {
     for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
 
     state(env)->host.next_ent += 150; /* i need some scratch ents for my mad hax */
-    /* lol tick 0 is special because evals to false (im lazy ok) */
+    /* lol tick 0 is special because lazy */
     state(env)->host.tick_count = 1;
 
-    state(env)->clnt.seed = 0x5EED;
-    state(env)->clnt.ts_last = env->ts();
-
-    state(env)->host.map_key = MapKey_Antechamber;
+    map_init(&state(env)->map, map_str, sizeof(map_str));
 
     log(env, "sup nerd");
     /* --- init state --- */
   }
   return (State *)env->stash.buf;
-}
-
-static float clnt_rand(Env *env) {
-  State *s = state(env);
-  s->clnt.seed ^= (s->clnt.seed << 17);
-  s->clnt.seed ^= (s->clnt.seed >> 13);
-  s->clnt.seed ^= (s->clnt.seed << 5);
-  return (float)s->clnt.seed/4294967295.0f;
 }
 
 static ClntEnt *clnt_ent_you(Env *env) {
@@ -734,130 +618,6 @@ static void rcx_p(int x, int y, uint32_t p) {
     );
   } else
     _rcx->pixels[i] = p;
-}
-
-typedef enum {
-  RcxSpurtForm_Boom,
-  RcxSpurtForm_Wedge,
-  RcxSpurtForm_Fountain,
-} RcxSpurtForm;
-typedef struct {
-  RcxSpurtForm form;
-  float size, duration;
-  int count;
-  uint32_t color;
-
-  /* RcxSpurtForm_Wedge */ float width;
-
-  float x, y;
-  /* RcxSpurtForm_Wedge */ float offset;
-} RcxSpurtDesc;
-RcxSpurtDesc spurt_kind_descs[SpurtKind_COUNT] = {
-  [SpurtKind_SparkWedge] = {
-    .form = RcxSpurtForm_Wedge,
-    .size = 1.3f,
-    .duration = 0.7f,
-    .count = 12,
-    .color = 0xFFFFFFFF,
-    .width = 0.25f,
-  },
-  [SpurtKind_ShootyThingyAlreadyDead] = {
-    .form = RcxSpurtForm_Wedge,
-    .size = 1.3f,
-    .duration = 1.7f,
-    .count = 4,
-    .color = 0xFFFFFFFF,
-    .width = 0.45f,
-  },
-  [SpurtKind_PlayerDies] = {
-    .form = RcxSpurtForm_Fountain,
-    .size = 1.4f,
-    .duration = 3.0f,
-    .count = 10,
-    .color = 0xF08888FF,
-  },
-  [SpurtKind_HitPlayer] = {
-    .form = RcxSpurtForm_Wedge,
-    .size = 1.7f,
-    .duration = 1.1f,
-    .count = 12,
-    .color = 0xF08888FF,
-    .width = 0.25f,
-  },
-  [SpurtKind_SawMasterDies] = {
-    .form = RcxSpurtForm_Boom,
-    .size = 2.5f,
-    .duration = 1.7f,
-    .count = 22,
-    .color = 0xFFFFFFFF,
-  },
-  [SpurtKind_SawMinionDies] = {
-    .form = RcxSpurtForm_Boom,
-    .size = 1.7f,
-    .duration = 1.7f,
-    .count = 17,
-    .color = 0xFFFFFFFF,
-  },
-  [SpurtKind_HpPotGulp] = {
-    .form = RcxSpurtForm_Fountain,
-    .size = 1.2f,
-    .duration = 3.0f,
-    .count = 18,
-    .color = 0xFF00FF00,
-  },
-};
-static void rcx_spurt(Env *env, Spurt *spurt) {
-  RcxSpurtDesc *rsd = spurt_kind_descs + spurt->kind;
-
-  float t = inv_lerp(spurt->ts_start, spurt->ts_end, env->ts());
-  float count7 = rsd->count * 0.7f;
-  for (int i = 0; i < rsd->count; i++) {
-    float mag = (map_tile_world_size * 0.5f) * rsd->size;
-    float fuzz_i = fmodf(i, count7)/count7;
-    float it = t + t*fuzz_i;
-
-    int x = spurt->x;
-    int y = spurt->y;
-    switch (rsd->form) {
-      case (RcxSpurtForm_Boom): {
-        x += cosf(GOLDEN_RATIO*i) * mag * it;
-        y += sinf(GOLDEN_RATIO*i) * mag * it;
-      } break;
-      case (RcxSpurtForm_Wedge): {
-        float distribute = cosf(MATH_TAU*GOLDEN_RATIO*i);
-        float sign = signf(distribute);
-        distribute = distribute * distribute * distribute * distribute * sign;
-        distribute *= 0.5f;
-        x += cosf(spurt->angle + distribute*rsd->width*MATH_TAU) * mag * it;
-        y += sinf(spurt->angle + distribute*rsd->width*MATH_TAU) * mag * it;
-      } break;
-      case (RcxSpurtForm_Fountain): {
-        int _x = mag*it * 0.7f;
-
-        float cosi = cosf(MATH_TAU*GOLDEN_RATIO*i);
-        float RANGE = 0.4157f;
-        float fi = (1.0f - RANGE) + RANGE*fabsf(cosi);
-
-        float xx = 2.0f * (it*0.9f) - 1;
-        y += (1 - xx*xx) * fi * mag;
-        if (cosi > 0) x -= _x;
-        else          x += _x;
-      } break;
-    }
-
-    if (it > 1.0f) continue;
-    rcx_p(x+0, y+0, rsd->color);
-    if (it > 0.75f) continue;
-    rcx_p(x+0, y+1, rsd->color);
-    rcx_p(x+1, y+0, rsd->color);
-    rcx_p(x-0, y-1, rsd->color);
-    rcx_p(x-1, y-0, rsd->color);
-    if (it > 0.45f) continue;
-    rcx_p(x+1, y+1, rsd->color);
-    rcx_p(x-1, y+1, rsd->color);
-    rcx_p(x+1, y-1, rsd->color);
-    rcx_p(x-1, y-1, rsd->color);
-  }
 }
 
 /* x, y in domain 0..8, c is char */
@@ -998,9 +758,6 @@ static int rcx_ent_swing(Env *env, ClntEnt *ent) {
 EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
   t_begin(__FUNCTION__);
 
-  float dt = env->ts() - state(env)->clnt.ts_last;
-  state(env)->clnt.ts_last = env->ts();
-
   double start_ts = env->ts();
 
   Rcx __rcx = {
@@ -1062,32 +819,13 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     {
       Client *clients = state(env)->host.clients;
       for (int i = 0; i < CLIENTS_MAX; i++)
-        nclient += clients[i].state != ClientState_Inactive;
+        nclient += clients[i].active;
     }
 
     char c = '1' + (nclient-1);
     rcx_str(0, 2*28, &c);
   }
 #endif
-
-  /* before we do any worldspace/ui, let's calc screenshake;
-   * applying inverted screenshake to ui really amplifies the effect!
-   */
-  float shake_x = 0, shake_y = 0;
-  {
-    State *s = state(env);
-    s->clnt.shake_secs -= dt;
-    if (s->clnt.shake_secs < 0) s->clnt.shake_secs = 0;
-    /* start gradually reducing shake when there's this much left */
-    float down_after = 0.85f;
-    float mult = (s->clnt.shake_secs < down_after)
-      ? s->clnt.shake_secs/down_after
-      : 1.0f;
-    shake_x = (1 - 2*clnt_rand(env)) * 5 * mult;
-    shake_y = (1 - 2*clnt_rand(env)) * 5 * mult;
-  }
-  _rcx->cfg.origin.x = shake_x;
-  _rcx->cfg.origin.y = shake_y;
 
   /* --- world space? --- */
 
@@ -1108,20 +846,19 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
   {
     t_begin("particles");
-    State *s = state(env);
 
     /* fountain, wedge, boom */
 
-    _rcx->cfg.origin.x = s->clnt.cam.x;
-    _rcx->cfg.origin.y = s->clnt.cam.y;
+    float t = fmod(env->ts(), 1.0);
+    for (int i = 0; i < 10; i++) {
+      int x = cosf(GOLDEN_RATIO*i) * ring_size;
+      int y = sinf(GOLDEN_RATIO*i) * ring_size;
+      x -= s->clnt.cam.x;
+      y -= s->clnt.cam.y;
 
-    for (int i = 0; i < ARR_LEN(s->clnt.spurts); i++) {
-      Spurt *spurt = s->clnt.spurts + i;
-      if (env->ts() < spurt->ts_end)
-        rcx_spurt(env, spurt);
+      rcx_p(x, y, 0xFF00FF00);
     }
 
-    rcx_cfg_default();
     t_end();
   }
 
@@ -1134,9 +871,6 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     if (you) {
       s->clnt.cam.x = lerp(s->clnt.cam.x, you->x - _rcx->size.x/2, 0.08f);
       s->clnt.cam.y = lerp(s->clnt.cam.y, you->y - _rcx->size.y/2, 0.08f);
-
-      s->clnt.cam.x -= shake_x;
-      s->clnt.cam.y -= shake_y;
     }
     _rcx->cfg.text_color = 0xFFFFFFFF;
 
@@ -1179,48 +913,11 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     t_end();
   }
 
-  float prog = state(env)->clnt.quaff_prog;
-  float qprog = inv_lerp(state(env)->clnt.quaff_zero_since + 0.5f,
-                     state(env)->clnt.quaff_zero_since,
-                     env->ts());
-  float mprog = (prog > qprog) ? prog : qprog;
-  if (you && mprog > 0) {
-    t_begin("quaff prog ui");
-
-    _rcx->cfg.origin.x = state(env)->clnt.cam.x;
-    _rcx->cfg.origin.y = state(env)->clnt.cam.y;
-
-    /* ring of pain ... not ? ... uh ... fairy ring! */
-    _rcx->cfg.alpha = mprog;
-    float prog = state(env)->clnt.quaff_prog;
-    for (int i = 0; i < 30; i++) {
-      float f = (i /    30.0f);
-      float p = f * MATH_TAU;
-      float t = cosf(env->ts()*3 + 3*p);
-      int x = you->x + (3*t + 35)*cosf(env->ts()*0.2f + p);
-      int y = you->y + (3*t + 35)*sinf(env->ts()*0.2f + p);
-
-      uint32_t color = (prog > f) ? 0xFF00FF00 : 0xAA33AA33;
-      rcx_p(x+0, y+0, color);
-      rcx_p(x+0, y+1, color);
-      rcx_p(x+1, y+0, color);
-      rcx_p(x-0, y-1, color);
-      rcx_p(x-1, y-0, color);
-      if (prog < f) continue;
-      rcx_p(x+1, y+1, color);
-      rcx_p(x-1, y+1, color);
-      rcx_p(x+1, y-1, color);
-      rcx_p(x-1, y-1, color);
-    }
-
-    rcx_cfg_default();
-    t_end();
-  }
-
   /* draw map */
   {
     t_begin("map");
     State *s = state(env);
+
 
     int min_x = s->clnt.cam.x;
     int max_x = s->clnt.cam.x + _rcx->size.x;
@@ -1228,21 +925,17 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     int max_y = s->clnt.cam.y + _rcx->size.y;
     for (int y = min_y; y < max_y; y++)
       for (int x = min_x; x < max_x; x++) {
-        int tx = map_x_from_world(&s->clnt.map, x);
-        int ty = map_y_from_world(&s->clnt.map, y);
+        int tx = map_x_from_world(&s->map, x);
+        int ty = map_y_from_world(&s->map, y);
 
-        if (!map_in_bounds(&s->clnt.map, tx, ty)) continue;
-        if (map_index(&s->clnt.map, tx, ty) != 'B') continue;
+        if (!map_in_bounds(&s->map, tx, ty)) continue;
+        if (map_index(&s->map, tx, ty) != 'B') continue;
 
         rcx_p(x - min_x, y - min_y, 0xAA4444AA);
       }
 
     t_end();
   }
-
-  /* -- okay i think it's like UI after here? -- */
-  _rcx->cfg.origin.x = -shake_x;
-  _rcx->cfg.origin.y = -shake_y;
 
   /* log */
   {
@@ -1317,37 +1010,12 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
     if (s->clnt.hp_pots) {
       if ((int)(env->ts()*2)%2) _rcx->cfg.text_color = 0xFFFFFFFF;
-      char *str = "SPACE TO QUAFF";
-      if (s->clnt.keysdown[WqVk_Space]) str = "NOW HOLD IT";
-
-      rcx_str(_rcx->size.x - scale*(len - 2), scale*2, str);
+      rcx_str(_rcx->size.x - scale*(len - 2),
+                             scale*2, "SPACE TO QUAFF");
     }
 
     rcx_cfg_default();
 
-    t_end();
-  }
-
-  {
-    t_begin("blood screenspace effect");
-    State *s = state(env);
-
-    s->clnt.blood_secs -= dt;
-    if (s->clnt.blood_secs < 0) s->clnt.blood_secs = 0;
-
-    float down_after = 0.5f;
-    float mult = (s->clnt.blood_secs < down_after)
-      ? s->clnt.blood_secs/down_after
-      : 1.0f;
-
-    _rcx->cfg.alpha = mult * (0.3f + 0.05f*cosf(env->ts() * 20));
-
-    if (s->clnt.blood_secs > 0 && _rcx->cfg.alpha > (1/255))
-      for (int y = 0; y < _rcx->size.y; y++)
-        for (int x = 0; x < _rcx->size.x; x++)
-          rcx_p(x, y, 0xFFFF0000);
-
-    rcx_cfg_default();
     t_end();
   }
 
@@ -1362,7 +1030,7 @@ static Client *clients_find(Env *env, uint32_t addr_hash) {
   Client *clients = state(env)->host.clients;
 
   for (int i = 0; i < CLIENTS_MAX; i++)
-    if (clients[i].state && clients[i].addr.hash == addr_hash)
+    if (clients[i].active && clients[i].addr.hash == addr_hash)
       return clients + i;
   return NULL;
 }
@@ -1371,7 +1039,7 @@ static Client *clients_storage(Env *env) {
   Client *clients = state(env)->host.clients;
 
   for (int i = 0; i < CLIENTS_MAX; i++)
-    if (clients[i].state == ClientState_Inactive)
+    if (!clients[i].active)
       return clients + i;
   log(env, "too many clients! dropping one");
   return NULL;
@@ -1385,18 +1053,6 @@ static HostEnt *host_ent_get(Env *env, EntId id) {
 }
 static EntId host_ent_id(Env *env, HostEnt *e) {
   return e - state(env)->host.ents;
-}
-
-/* find Client * associated with this EntId */
-static Client *host_ent_client(Env *env, EntId id) {
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = state(env)->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-    if (c->pc != id) continue;
-
-    return c;
-  }
-  return NULL;
 }
 
 /* how many ticks in a second? */
@@ -1437,27 +1093,17 @@ static int host_hit_table_debounce(Env *env, EntId dealt_by, EntId dealt_to) {
 /* to client */
 typedef enum {
   ToClntMsgKind_Ping,
-  ToClntMsgKind_Map,
   ToClntMsgKind_EntUpd,
-  ToClntMsgKind_HpPots,
   ToClntMsgKind_Swing,
-  ToClntMsgKind_BloodSecs,
-  ToClntMsgKind_ShakeSecs,
-  ToClntMsgKind_Spurt,
+  ToClntMsgKind_HpPots,
 } ToClntMsgKind;
 
 typedef struct {
   ToClntMsgKind kind;
   union {
-    /* _Map    */ MapKey map;
     /* _EntUpd */ struct { EntId id; uint32_t tick; EntUpd ent; } ent_upd;
     /* _Swing  */ struct { EntId id; uint32_t tick; float dir; double secs; } swing;
-    /* _HpPots */ struct { float quaff_prog; uint16_t hp_pots; } hp_pots;
-
-    /* blood, sex ... what kind of game am I making?!?? */
-    /* _BloodSecs */ float add_blood_secs;
-    /* _ShakeSecs */ float add_shake_secs;
-    /* _Spurt */ struct { SpurtKind kind; float x, y, angle; } spurt;
+    /* _HpPots */ uint16_t hp_pots;
   };
 } ToClntMsg;
 
@@ -1584,7 +1230,7 @@ static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e, HostEntTileCo
 
 typedef struct {
   HostEnt *hitter;
-  struct { float x, y; } hit_place, swing_dir;
+  struct { float x, y; } swing_dir;
 } HostEntSwordCollisionOut;
 static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionOut *out) {
   uint32_t tick = state(env)->host.tick_count;
@@ -1652,9 +1298,6 @@ static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionO
           out->swing_dir.y = now_tip_y - last_tip_y;
           norm(&out->swing_dir.x,
                &out->swing_dir.y);
-
-          out->hit_place.x = lhc.closest.x;
-          out->hit_place.y = lhc.closest.y;
         }
         EntId p_id = host_ent_id(env, p);
         EntId e_id = host_ent_id(env, e);
@@ -1665,104 +1308,15 @@ static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionO
   return 0;
 }
 
-static void ts_send_blood(Env *env, EntId id, float secs) {
-  Client *c = host_ent_client(env, id);
-  if (!c) return;
-
-  ToClntMsg msg = { .kind = ToClntMsgKind_BloodSecs, .add_blood_secs = secs };
-  env->send(&c->addr, (void *)&msg, sizeof(msg));
-}
-
-typedef struct {
-  float x, y;
-  float nx, ny; /* normal tells wedge where to point */
-  SpurtKind kind;
-} TsSpurt;
-static void ts_spurt_nearby(Env *env, float dist, TsSpurt *tsprt) {
-  /* TODO: localize? */
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = state(env)->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-
-    HostEnt *e = host_ent_get(env, c->pc);
-    if (!e) continue;
-
-    if (mag(e->x - tsprt->x,
-            e->y - tsprt->y) < dist) {
-      ToClntMsg msg = {
-        .kind = ToClntMsgKind_Spurt,
-        .spurt.kind = tsprt->kind,
-        .spurt.x = tsprt->x,
-        .spurt.y = tsprt->y,
-      };
-
-      if (fabsf(tsprt->ny + tsprt->nx) > 0)
-        msg.spurt.angle = atan2f(tsprt->ny, tsprt->nx);
-
-      env->send(&c->addr, (void *)&msg, sizeof(msg));
-    }
-  }
-}
-
-static void ts_spurt_nearby_hesco(
-    Env *env, HostEntSwordCollisionOut *hesco,
-    float dist, SpurtKind kind
-) {
-  ts_spurt_nearby(env, dist, &(TsSpurt) {
-    .kind = kind,
-    .nx   = -hesco->swing_dir.x,
-    .ny   = -hesco->swing_dir.y,
-    .x    = hesco->hit_place.x,
-    .y    = hesco->hit_place.y,
-  });
-}
-
-static void ts_shake_nearby(Env *env, float x, float y, float dist, float secs) {
-  /* TODO: localize? */
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = state(env)->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-
-    HostEnt *e = host_ent_get(env, c->pc);
-    if (!e) continue;
-
-    if (mag(e->x - x,
-            e->y - y) < dist) {
-      ToClntMsg msg = { .kind = ToClntMsgKind_ShakeSecs, .add_shake_secs = secs };
-      env->send(&c->addr, (void *)&msg, sizeof(msg));
-    }
-  }
-}
-static void ts_kill_player(Env *env, EntId id) {
-  Client *c = host_ent_client(env, id);
-  HostEnt *e = host_ent_get(env, id);
-  if (!c) return;
-
-  c->state = ClientState_Dead;
-  c->tick_state_start = state(env)->host.tick_count;
-  c->tick_state_end   = state(env)->host.tick_count + 2.5f * TICK_SECOND;
-}
-
-static int ts_ent_hurt_player(Env *env, HostEnt *collider, float gx, float gy) {
+static int ts_ent_hurt_player(Env *env, HostEnt *collider) {
   HostEntEntCollisionState heecs = { .env = env, .collider = collider };
   while (host_ent_ent_collision(&heecs)) {
     HostEnt *hit = host_ent_get(env, heecs.hit_id);
     if (hit->is_player) {
       hit->hp -= 1;
-      ts_send_blood(env, heecs.hit_id, 0.9f);
-      if (hit->hp <= 0) ts_kill_player(env, heecs.hit_id);
-      
-      float nx = collider->x - gx;
-      float ny = collider->y - gy;
-      norm(&nx, &ny);
-      ts_spurt_nearby(env, map_tile_world_size*3, &(TsSpurt) {
-        .kind = SpurtKind_HitPlayer,
-        .nx   = nx,
-        .ny   = ny,
-        .x    = hit->x,
-        .y    = hit->y,
-      });
-
+      if (hit->hp <= 0)
+        hit->hp = hit->max_hp,
+        hit->x = hit->y = 0.0f;
       return 1;
     }
   }
@@ -1791,12 +1345,20 @@ static void ts_hp_pots(Env *env, TutorialState *ts) {
     HostEntEntCollisionState heecs = { .env = env, .collider = h_e };
     while (host_ent_ent_collision(&heecs)) {
       HostEnt *hit = host_ent_get(env, heecs.hit_id);
-      Client *c = hit->is_player ? host_ent_client(env, heecs.hit_id) : NULL;
-      if (!c) continue;
 
-      c->hp_pots++;
-      *collected = 1;
-      break;
+      if (hit->is_player) {
+        *collected = 1;
+
+        /* find Client * associated with this player */
+        for (int i = 0; i < CLIENTS_MAX; i++) {
+          Client *c = state(env)->host.clients + i;
+          if (!c->active) continue;
+          if (c->pc != heecs.hit_id) continue;
+
+          c->hp_pots++;
+          break;
+        }
+      }
     }
   }
 }
@@ -1831,23 +1393,13 @@ static void ts_sword(Env *env, TutorialState *ts, EntId sword_id) {
   }
 }
 
-static void ts_bouncy_saw_tick(Env *env, TutorialState *ts, BouncySaw *bs, float ox, float oy) {
+static void ts_bouncy_saw_tick(Env *env, TutorialState *ts, BouncySaw *bs) {
   HostEnt *bse = host_ent_get(env, eit_p(&ts->eit, bs));
   *bse = (HostEnt) { .kind = EntKind_Limbo, .looks = 'O' };
   switch (bs->state) {
 
     case (BouncySawState_Init): {
       bs->state = BouncySawState_Going;
-    } break;
-
-    case (BouncySawState_Sucking): {
-      float t = inv_lerp(bs->ts_state_start, bs->ts_state_end, env->ts());
-      if (t > 1) t = 1;
-      bse->kind = ((int)(env->ts() * 1000)/20 % 3 == 2)
-        ? EntKind_Limbo
-        : EntKind_Alive;
-      bse->x = lerp(bs->pos.x, ox, t);
-      bse->y = lerp(bs->pos.y, oy, t);
     } break;
 
     case (BouncySawState_Going): {
@@ -1868,9 +1420,7 @@ static void ts_bouncy_saw_tick(Env *env, TutorialState *ts, BouncySaw *bs, float
       /* ouch! tears clear through ya */
       uint32_t tick = state(env)->host.tick_count;
       int can_hurt = bs->tick_no_hurt_till <= tick;
-      if (can_hurt && ts_ent_hurt_player(env, bse,
-                                         bs->pos.x + bs->vel.x,
-                                         bs->pos.y + bs->vel.y))
+      if (can_hurt && ts_ent_hurt_player(env, bse))
         bs->tick_no_hurt_till = tick + TICK_SECOND/2;
     } break;
 
@@ -2016,14 +1566,12 @@ static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
       sme->x = sm->pos_state_start.x;
       sme->y = sm->pos_state_start.y;
 
-      float gx = sm->pos_state_end.x;
-      float gy = sm->pos_state_end.y;
-      fbe->x = lerp(sm->pos_state_start.x, gx, t);
-      fbe->y = lerp(sm->pos_state_start.y, gy, t);
+      fbe->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
+      fbe->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
       fbe->kind = EntKind_Alive;
 
       /* bullets hitting stuff is cool */
-      if (ts_ent_hurt_player(env, fbe, gx, gy))
+      if (ts_ent_hurt_player(env, fbe))
         sm->state = SawMinionState_Think;
 
       if (t < 1.0) break;
@@ -2044,13 +1592,6 @@ static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
       sm->ts_state_end   = env->ts() + WAIT;
     } break;
 
-    case (SawMinionState_Sucking): {
-      sme->kind = ((int)(env->ts() * 1000)/20 % 3 == 1)
-        ? EntKind_Limbo
-        : EntKind_Alive;
-      sme->x = lerp(sm->pos_state_start.x, sm->pos_state_end.x, t);
-      sme->y = lerp(sm->pos_state_start.y, sm->pos_state_end.y, t);
-    }
   }
 
   /* if you hit a wall, rethink your life */
@@ -2068,20 +1609,10 @@ static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
   int damagable = !dead;
   HostEntSwordCollisionOut hesco = {0};
   if (damagable && host_ent_sword_collision(env, sme, &hesco)) {
-    ts_spurt_nearby_hesco(
-      env, &hesco,
-      map_tile_world_size * 3.0f, SpurtKind_SparkWedge);
-
     sm->hp -= 1;
-    if (sm->hp <= 0) {
+    if (sm->hp <= 0)
       sm->state = SawMinionState_Dead;
-
-      ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-        .kind = SpurtKind_SawMinionDies,
-        .x    = sme->x,
-        .y    = sme->y,
-      });
-    } else {
+    else {
       /* knockback! */
       // float dx = sme->x - hesco.hitter->x;
       // float dy = sme->y - hesco.hitter->y;
@@ -2141,110 +1672,7 @@ static void ts_saw_minion_tick_collision_pass(Env *env, TutorialState *ts, SawMi
   }
 }
 
-static void host_tick_players(Env *env, Map *map) {
-  State *s = state(env);
-  uint32_t tick = s->host.tick_count;
-
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = s->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-
-    HostEnt *pc_e = host_ent_get(env, c->pc);
-    float t = ((c->tick_state_end - c->tick_state_start) != 0)
-      ? inv_lerp(c->tick_state_start, c->tick_state_end, s->host.tick_count)
-      : 0;
-    switch (c->state) {
-
-      case (ClientState_Play): {
-        pc_e->kind = EntKind_Alive;
-
-        /* apply Client velocity */
-        float speed = 6.0f;
-
-        int ticks_since_last = tick - c->tick_quaff_last;
-        if (ticks_since_last < TICK_SECOND*QUAFF_LAPSE)
-          speed = 2.0f;
-
-        pc_e->x += c->vel.x * speed;
-        pc_e->y += c->vel.y * speed;
-        host_ent_tile_collision(env, map, pc_e, NULL);
-      } break;
-
-      case (ClientState_Dead): {
-        pc_e->kind = EntKind_Limbo;
-        int range = c->tick_state_end - c->tick_state_start;
-        if ((s->host.tick_count)%(range/3) == 2)
-          ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-            .kind = SpurtKind_PlayerDies,
-            .x    = pc_e->x,
-            .y    = pc_e->y,
-          });
-
-        if (t < 1.0f) break;
-        log(env, "i weep for you, truly.");
-
-        pc_e->x = pc_e->y = 0.0f;
-        pc_e->hp = pc_e->max_hp;
-        c->state = ClientState_Play;
-      } break;
-
-    }
-  }
-}
-
-static void ante_tick(Env *env, AnteState *ante) {
-  State *s = state(env);
-
-  Map *map = &ante->map;
-  map_init(map, MapKey_Antechamber);
-
-  EntIdTable *eit = &ante->eit;
-  eit->pointer_offset = ante;
-  eit->ent_id_offset = 50;
-
-  uint32_t tick = s->host.tick_count;
-  double sec = (double)tick / (double)TICK_SECOND;
-
-  /* lil lost spinny dude */
-  *host_ent_get(env, eit_p(eit, map)) = (HostEnt) {
-    .kind = EntKind_Alive, 
-    .looks = 'p',
-    .sword = 1,
-    .x = cosf(env->ts()) * 50,
-    .y = sinf(env->ts()) * 50,
-  };
-
-  /* tick players */
-  host_tick_players(env, map);
-
-  {
-    HostEnt *door = host_ent_get(env, eit_pi(eit, map, 1));
-
-    MapIter mi = { .map = map };
-    if (map_iter(&mi, 'd')) {
-      /* pos is center of the tile */
-      *door = (HostEnt) {
-        .kind = EntKind_Alive,
-        .looks = 'd',
-        .x = map_x_to_world(map, mi.tx) + map_tile_world_size/2,
-        .y = map_y_to_world(map, mi.ty) + map_tile_world_size/2,
-      };
-
-      HostEntEntCollisionState heecs = { .env = env, .collider = door };
-      while (host_ent_ent_collision(&heecs)) {
-        HostEnt *hit = host_ent_get(env, heecs.hit_id);
-
-        if (hit->is_player) {
-          hit->x = hit->y = 0;
-          s->host.map_key = MapKey_Tutorial;
-          return;
-        }
-      }
-    }
-  }
-}
-
-static void ts_tick(Env *env, TutorialState *ts) {
+static void host_tick(Env *env) {
   State *s = state(env);
 
   uint32_t tick = s->host.tick_count;
@@ -2261,15 +1689,26 @@ static void ts_tick(Env *env, TutorialState *ts) {
     .y = sinf(env->ts()) * 50,
   };
 
-  Map *map = &ts->map;
-  map_init(map, MapKey_Tutorial);
-
+  /* tutorial level logic */
+  TutorialState *ts = &s->host.tutorial;
   EntIdTable *eit = &ts->eit;
   eit->pointer_offset = ts;
   eit->ent_id_offset = 50;
 
-  /* tick players */
-  host_tick_players(env, map);
+  /* TODO: make ts authoritative about this */
+  memcpy(&ts->map, &s->map, sizeof(Map));
+  Map *map = &ts->map;
+
+  /* move players */
+  for (int i = 0; i < CLIENTS_MAX; i++) {
+    Client *c = s->host.clients + i;
+    if (!c->active) continue;
+
+    /* apply Client velocity */
+    host_ent_get(env, c->pc)->x += c->vel.x * 6.0f;
+    host_ent_get(env, c->pc)->y += c->vel.y * 6.0f;
+    host_ent_tile_collision(env, map, host_ent_get(env, c->pc), NULL);
+  }
 
   ts_sword(env, ts, eit_p(eit, &ts->sword_collected));
   ts_hp_pots(env, ts);
@@ -2337,16 +1776,8 @@ static void ts_tick(Env *env, TutorialState *ts) {
     };
 
     /* did you swipe our shooty thingy!? */
-    HostEntSwordCollisionOut hesco = {0};
-    if (host_ent_sword_collision(env, shooty, &hesco)) {
-      ts_spurt_nearby_hesco(
-        env, &hesco, map_tile_world_size * 3.0f,
-        ts->dead_after_cycle[fb_i]
-          ? SpurtKind_ShootyThingyAlreadyDead
-          : SpurtKind_SparkWedge
-      );
+    if (host_ent_sword_collision(env, shooty, NULL))
       ts->dead_after_cycle[fb_i] = (int)cycle-1;
-    }
 
     fb_i++;
   }
@@ -2384,8 +1815,7 @@ static void ts_tick(Env *env, TutorialState *ts) {
 
         ts->dead_on_cycle[fb_i] = (int)cycle;
 
-        ts_send_blood(env, heecs.hit_id, 1.15f);
-        if (hit->is_player) ts_kill_player(env, heecs.hit_id);
+        if (hit->is_player) hit->x = hit->y = 0.0f;
       }
     }
 
@@ -2432,62 +1862,27 @@ static void ts_tick(Env *env, TutorialState *ts) {
           sm->state = SawMasterState_WaveStart;
       } break;
 
-      case (SawMasterState_BlinkSucking): {
-        sme->kind = ((int)(env->ts() * 1000)/20 % 3 == 0)
-          ? EntKind_Limbo
-          : EntKind_Alive;
-
-        /* bouncy saws */
-        for (int i = 0; i < ARR_LEN(sm->bouncy_saws); i++) {
-          BouncySaw *bs = sm->bouncy_saws + i;
-          if (bs->state == BouncySawState_Gone) continue;
-          bs->state          = BouncySawState_Sucking;
-          bs->ts_state_start = sm->ts_state_start;
-          bs->ts_state_end   = sm->ts_state_end  ;
-        }
-
-        if (t < 1.0) break;
-        /* uhhh ... TODO: structify these/this? */
-        sm->bouncy_saw_count = 0;
-        memset(sm->bouncy_saws, 0, sizeof(sm->bouncy_saws));
-        sm->minion_count = 0;
-        memset(sm->minions, 0, sizeof(sm->minions));
-
-        sm->saws_launched = 0;
-        sm->state = SawMasterState_Blink;
-        sm->ts_state_start = env->ts();
-        sm->ts_state_end   = env->ts() + 0.8f*sm->times_killed;
-      } break;
-
       case (SawMasterState_Blink): {
-        sme->kind = ((int)(env->ts() * 1000)/20 % 2)
-          ? EntKind_Limbo
-          : EntKind_Alive;
+        sme->kind = ((int)(env->ts() * 1000)/20 % 2) ? EntKind_Limbo : EntKind_Alive;
 
         if (t < 1.0) break;
         sm->state = (sm->times_killed >= 3)
           ? SawMasterState_Defeated
           : SawMasterState_WaveStart;
-
-        if (sm->state == SawMasterState_Defeated)
-          ts_shake_nearby(
-            env, sme->x, sme->y,
-            map_tile_world_size*5, 0.8f
-          );
       } break;
 
       case (SawMasterState_WaveStart): {
+        /* uhhh ... TODO: structify these? */
+        sm->bouncy_saw_count = 0;
+        memset(sm->bouncy_saws, 0, sizeof(sm->bouncy_saws));
+        sm->minion_count = 0;
+        memset(sm->minions, 0, sizeof(sm->minions));
 
         sm->state = SawMasterState_BouncySaw;
         sm->saws_launched = 0;
         sm->saws_to_launch = (1 + sm->times_killed) * 3;
         sm->ts_state_start = env->ts();
         sm->ts_state_end   = env->ts() + 0.5f;
-
-        ts_shake_nearby(
-          env, sme->x, sme->y,
-          map_tile_world_size*5, 3.0f + sm->times_killed
-        );
       } break;
 
       case (SawMasterState_BouncySaw): {
@@ -2538,37 +1933,12 @@ static void ts_tick(Env *env, TutorialState *ts) {
         sme->looks = 'E';
 
         /* ouchy y u hurty saw master */
-        HostEntSwordCollisionOut hesco = {0};
-        int hit = host_ent_sword_collision(env, sme, &hesco);
-        if (hit)
-          ts_spurt_nearby_hesco(
-            env, &hesco,
-            map_tile_world_size * 3.0f, SpurtKind_SparkWedge);
-        if (hit && --sm->hp == 0) {
+        if (host_ent_sword_collision(env, sme, NULL) && --sm->hp == 0) {
           sm->times_killed++;
 
-          ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-            .kind = SpurtKind_SawMasterDies,
-            .x    = sme->x,
-            .y    = sme->y,
-          });
-
           sm->ts_state_start = env->ts();
-          sm->ts_state_end   = env->ts() + 1.0f;
-          sm->state = SawMasterState_BlinkSucking;
-
-          for (int i = 0; i < ARR_LEN(sm->minions); i++) {
-            SawMinion *min = sm->minions + i;
-            HostEnt *min_e = host_ent_get(env, eit_p(eit, min));
-            if (min->state == SawMinionState_Dead) continue;
-            min->state          = SawMinionState_Sucking;
-            min->ts_state_start = sm->ts_state_start;
-            min->ts_state_end   = sm->ts_state_end  ;
-            min->pos_state_start.x = min_e->x;
-            min->pos_state_start.y = min_e->y;
-            min->pos_state_end.x = ox;
-            min->pos_state_end.y = oy;
-          }
+          sm->ts_state_end   = env->ts() + 0.8f*sm->times_killed;
+          sm->state = SawMasterState_Blink;
           break;
         }
 
@@ -2601,7 +1971,7 @@ static void ts_tick(Env *env, TutorialState *ts) {
 
     /* bouncy saws */
     for (int i = 0; i < sm->bouncy_saw_count; i++)
-      ts_bouncy_saw_tick(env, ts, sm->bouncy_saws + i, ox, oy);
+      ts_bouncy_saw_tick(env, ts, sm->bouncy_saws + i);
 
     /* saw minions */
     for (int i = 0; i < sm->minion_count; i++) {
@@ -2628,17 +1998,6 @@ static void ts_tick(Env *env, TutorialState *ts) {
       .init_y = map_y_to_world(map, mi.ty) + map_tile_world_size/2
     });
   ts_saw_minion_tick_collision_pass(env, ts, ts->saw_minions, sm_count);
-}
-
-static void host_tick(Env *env) {
-  State *s = state(env);
-  uint32_t tick = s->host.tick_count;
-
-  /* tutorial level logic */
-  if (s->host.map_key == MapKey_Tutorial)
-    ts_tick(env, &s->host.tutorial);
-  if (s->host.map_key == MapKey_Antechamber)
-    ante_tick(env, &s->host.ante);
 
   /* broadcast to ERRYBUDDY */
   ToClntMsg msg = {
@@ -2646,33 +2005,16 @@ static void host_tick(Env *env) {
     .ent_upd = { .tick = tick }
   };
 
-  /* send clients in this level all the info for this level */
   for (int i = 0; i < CLIENTS_MAX; i++) {
     Client *c = s->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
+    if (!c->active) continue;
 
     /* also, hey, hi, this is how many health potions you have */
     {
-      uint32_t tick = state(env)->host.tick_count;
-      int ticks_since_start = tick - c->tick_quaff_earliest;
-      int ticks_since_last = tick - c->tick_quaff_last;
-      const int QUAFF_TICKS = TICK_SECOND*QUAFF_SECONDS;
       ToClntMsg msg = {
         .kind = ToClntMsgKind_HpPots,
-        .hp_pots = {
-          .hp_pots = c->hp_pots,
-          .quaff_prog = (ticks_since_last <= QUAFF_LAPSE*TICK_SECOND)
-            ? ((float)ticks_since_start / (float)QUAFF_TICKS)
-            : 0,
-        }
+        .hp_pots = c->hp_pots,
       };
-      env->send(&c->addr, (void *)&msg, sizeof(msg));
-    }
-    
-    /* also hey hi this is what map you are on */
-    {
-      MapKey map = state(env)->host.map_key;
-      ToClntMsg msg = { .kind = ToClntMsgKind_Map, .map = map };
       env->send(&c->addr, (void *)&msg, sizeof(msg));
     }
 
@@ -2740,11 +2082,10 @@ static void host_recv_msg_swing(Env *env, Client *client, ToHostMsg *msg) {
   out_msg.swing.dir = msg->swing.dir;
   out_msg.swing.secs = (double)tick_duration / (double)TICK_SECOND;
 
-  /* tell everyone someone swung! */
+  /* broadcast! */
   for (int i = 0; i < CLIENTS_MAX; i++) {
     Client *c = s->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-
+    if (!c->active) continue;
     env->send(&c->addr, (void *)&out_msg, sizeof(out_msg));
   }
 }
@@ -2766,7 +2107,7 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
       .y = 0,
     };
     *client = (Client) {
-      .state = ClientState_Play,
+      .active = 1,
       .addr = *addr,
       .pc = pc,
     };
@@ -2783,45 +2124,12 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
 
   if (msg->kind == ToHostMsgKind_Quaff) {
     /* yum ... :1 */
+    log(env, "*gulps greedily*");
     HostEnt *pc_e = host_ent_get(env, client->pc);
-    uint32_t tick = state(env)->host.tick_count;
-
-    /* so you want to quaff? send a chain of Quaff messages
-     * where no two sequential messages are more than QUAFF_LAPSE apart,
-     * and the delta-t from the earliest to the latest is >= QUAFF_SECONDS
-     *
-     * your messages are ignored if they don't meet the following criteria: */
-
-    if (client->state == ClientState_Play &&
-        (pc_e && pc_e->hp != pc_e->max_hp) &&
-        client->hp_pots > 0
-    ) {
-
-      int ticks_since_last = tick - client->tick_quaff_last;
-      int ticks_since_start = tick - client->tick_quaff_earliest;
-      const int QUAFF_TICKS = TICK_SECOND*QUAFF_SECONDS;
-
-      /* break the chain! can assume this message is new head */
-      if (ticks_since_last > QUAFF_LAPSE*TICK_SECOND)
-        client->tick_quaff_earliest = client->tick_quaff_last = tick;
-      else if (ticks_since_start >= QUAFF_TICKS) {
-        /* probably important to reset these idk */
-        client->tick_quaff_earliest = client->tick_quaff_last = 0;
-
-        log(env, "*gulps greedily*");
-        ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-          .kind = SpurtKind_HpPotGulp,
-          .x    = pc_e->x,
-          .y    = pc_e->y,
-        });
-
-        client->hp_pots--;
-        pc_e->hp += 3;
-        if (pc_e->hp > pc_e->max_hp)
-          pc_e->hp = pc_e->max_hp;
-      }
-      else
-        client->tick_quaff_last = tick;
+    if (pc_e) {
+      pc_e->hp += 3;
+      if (pc_e->hp > pc_e->max_hp)
+        pc_e->hp = pc_e->max_hp;
     }
   }
 
@@ -2831,8 +2139,7 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
     norm(&client->vel.x, &client->vel.y);
   }
   if (msg->kind == ToHostMsgKind_Swing)
-    if (client->state == ClientState_Play)
-      host_recv_msg_swing(env, client, msg);
+    host_recv_msg_swing(env, client, msg);
 }
 
 static void clnt_recv(Env *env, uint8_t *buf, int len) {
@@ -2849,12 +2156,6 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
   ToClntMsg *msg = (ToClntMsg *)buf;
   if (msg->kind == ToClntMsgKind_Ping)
     log(env, "got host Ping!");
-  if (msg->kind == ToClntMsgKind_Map) {
-    map_init(&state(env)->clnt.map, msg->map);
-
-    // ToHostMsg msg = { .kind = ToHostMsgKind_Ack };
-    // env->send_to_host((void *)&msg, sizeof(msg));
-  }
   if (msg->kind == ToClntMsgKind_EntUpd) {
     uint32_t tick = msg->ent_upd.tick;
 
@@ -2870,16 +2171,6 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
       s->clnt.ents[msg->ent_upd.id].hp     = msg->ent_upd.ent.hp;
     }
   }
-  if (msg->kind == ToClntMsgKind_HpPots) {
-    s->clnt.hp_pots    = msg->hp_pots.hp_pots;
-
-    if (msg->hp_pots.quaff_prog <= 0) {
-      if (s->clnt.quaff_zero_since <= 0.0f)
-        s->clnt.quaff_zero_since = env->ts();
-    } else
-      s->clnt.quaff_zero_since = 0;
-    s->clnt.quaff_prog = msg->hp_pots.quaff_prog;
-  }
   if (msg->kind == ToClntMsgKind_Swing) {
     /* prolly shoulda put these in band with the other stuffs but, ah.
      * ... guess time conversions prolly problematic? */
@@ -2889,28 +2180,8 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
     s->clnt.ents[msg->swing.id].swing.ts_end = env->ts() + msg->swing.secs;
     s->clnt.ents[msg->swing.id].swing.dir = msg->swing.dir;
   }
-  if (msg->kind == ToClntMsgKind_BloodSecs) {
-    s->clnt.blood_secs += msg->add_blood_secs;
-  }
-  if (msg->kind == ToClntMsgKind_ShakeSecs) {
-    s->clnt.shake_secs += msg->add_shake_secs;
-  }
-  if (msg->kind == ToClntMsgKind_Spurt) {
-    for (int i = 0; i < ARR_LEN(s->clnt.spurts); i++) {
-      Spurt *spurt = s->clnt.spurts + i;
-      if (spurt->ts_end < env->ts()) {
-        *spurt = (Spurt) {
-          .ts_start = env->ts(),
-          .ts_end   = env->ts() + spurt_kind_descs[msg->spurt.kind].duration,
-          .kind  = msg->spurt.kind,
-          .x     = msg->spurt.x,
-          .y     = msg->spurt.y,
-          .angle = msg->spurt.angle,
-        };
-        break;
-      }
-    }
-  }
+  if (msg->kind == ToClntMsgKind_HpPots)
+    s->clnt.hp_pots = msg->hp_pots;
 }
 
 EXPORT void wq_update(Env *env) {
@@ -2944,11 +2215,6 @@ EXPORT void wq_update(Env *env) {
     if (s->clnt.keysdown[WqVk_D]) msg.move.x += 1;
 
     env->send_to_host((void *)&msg, sizeof(msg));
-
-    if (s->clnt.keysdown[WqVk_Space]) {
-      ToHostMsg msg = { .kind = ToHostMsgKind_Quaff };
-      env->send_to_host((void *)&msg, sizeof(msg));
-    }
   }
 
   /* server gotta do server stuff */
@@ -3000,6 +2266,11 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
     free(env->stash.buf);
     env->stash.buf = NULL;
     state(env);
+  }
+
+  if (c == WqVk_Space) {
+    ToHostMsg msg = { .kind = ToHostMsgKind_Quaff };
+    env->send_to_host((void *)&msg, sizeof(msg));
   }
 
   // char str[256] = {0};

@@ -16,6 +16,7 @@ typedef enum {
   WqVk_D     = 32,
   WqVk_Esc   = 1,
   WqVk_Tilde = 41,
+  WqVk_Space = 57,
   WqVk_MAX,
 } WqVk;
 
