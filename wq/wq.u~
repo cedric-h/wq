@@ -188,8 +188,6 @@ static void log(Env *e, char *p);
 #define map_tile_world_size (90)
 #define player_world_size (8*4)
 typedef enum {
-  MapKey_Ahquicker,
-  MapKey_Ahquicker_Stuff,
   MapKey_MoleHole,
   MapKey_Tutorial,
   MapKey_COUNT,
@@ -207,97 +205,15 @@ typedef struct {
 //   "B..................!u....eee\n"
 //   "B....B^B.B^B.B^B.B...^B.eeeB\n"
 //   "BBBBBBBBBBBBBBBBBBBBBBBBBBBB\n";
-
-/* you're welcome, leo */
 char *map_strs[MapKey_COUNT] = {
-
-    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-    "BBBBBBBBBBBBBBBBBBBBBB.....BBBBBBBBBB\n"
-    "BBBBB++++++++++.............BBBBBBBBB\n"
-    "BBBBB++++++++++........B.......BBBBBB\n"
-    "BBBBBB.......+......BBBB.........BBBB\n"
-    "BBBBB+++.BBBBBBBBBBBBBBB..........BBB\n"
-    "BBBBB+++BBBBBBBBBBBBBBB...........BBB\n"
-    "BBBBB+++BBBBBBBB..................BBB\n"
-    "BBBBB...BBBBBBB....................BB\n"
-    "BBBBB...BBBBB++++++................BB\n"
-    "BBBBB.u.BBBBB++++++++++++..........BB\n"
-    "BBBBBBBBBBB++++++++++++++++++++....BB\n"
-    "BBBBBBBBBBB++++++++++++++++++++++..BB\n"
-    "BBBBBBBBBBBB+++++++..i.....++++++..BB\n"
-    "BBB..+++...BB++++.BBBBBBBBB.+++++.BBB\n"
-    "BB+++++++++iB+++.iBq..+++++.i++++BBBB\n"
-    "B.+++++++++..+++..B..+++++B.+++++..BB\n"
-    "B..+++++++++++++..B..+++++B.+++++..BB\n"
-    "BB.+++...+++++++.iB..+++idB..++++BhBB\n"
-    "BBB+++.BB++++++..+BBBBBBBBBi.++++BBBB\n"
-    "BBi+++BBB.+++++i.+++i.++.i..+++++BBBB\n"
-    "BB.+++BBBB.++++++++++++++..++++++BBBB\n"
-    "BB.+++BBBB.+++++++++++++++++++++BBBBB\n"
-    "BB.+++iBBBB.+++++++++++++++++++BBBBBB\n"
-    "BB.+++.BBBBB...++++++++++++++BBBB.dBB\n"
-    "BBB.++++BBBBBB...+++...BBBBBBBBi...BB\n"
-    "BBB...+++.iBBBB..+++..BBBBBBBB..+..BB\n"
-    "BBBBBB.++++.BBBB.+++.BBBBBBBBB+++++BB\n"
-    "BBBBBBBB.++.BBB..+++..BBBBBBBBB++BBBB\n"
-    "BBBBBBB..++.iBB..+++..iBBBBBBB+++BBBB\n"
-    "BBBBBBB.+++.BBBBB.++++...BBB..++BBBBB\n"
-    "BBBBB..i+++BBBBBB.i.+++++.Bi.++.BBBBB\n"
-    "BBBBd..+++BBBBBBBBB....++++++++iBBBBB\n"
-    "BBBBB.++BBBBBBBBBBBBBBBB.+++++.BBBBBB\n"
-    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
-  [MapKey_Ahquicker] = 
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBB...BBB\n"
-    "BBB+++BBB\n"
-    "BBB+++BBB\n"
-    "BBB+++BBB\n"
-    "BBB...BBB\n"
-    "BBB...BBB\n"
-    "BBB.u.BBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-  ,
-  [MapKey_Ahquicker_Stuff] = 
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBB...BBB\n"
-    "BBB+++BBB\n"
-    "BBB+++BBB\n"
-    "BBB+++BBB\n"
-    "BBB..OBBB\n"
-    "BBB...BBB\n"
-    "BBB.u.BBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-    "BBBBBBBBB\n"
-  ,
   [MapKey_MoleHole] = 
-      "..BBBBBBBBBBBBBB...\n"
-      ".BB...BBB......BBBB\n"
-      "BB..B.....BBB.....B\n"
-      "B..BB.BB.BBBBBBB..B\n"
-      "Bh.B..B..B.....B..B\n"
-      "BB.B..B.BB.m.m....B\n"
-      "BB.BB..hBBm.d.mBBBB\n"
-      "B...BBBBBB..m..BwhB\n"
-      "B.....BuBB.....BB.B\n"
-      "Bo..o.B.BBBBBBBBB.B\n"
-      "Bo..oBB.BB..BB..B.B\n"
-      "Bo..oB......n.....B\n"
-      "B...BBBBBBBn.nBBB.B\n"
-      "BB.BBhBBB.......B.B\n"
-      ".B.BB.......BBB...B\n"
-      ".B.hBBB..BBBBBw...B\n"
-      ".BB..wBBBB..BB..w.B\n"
-      "..BB.............BB\n"
-      "...BBBBBBBBBBBBBBB.\n"
+      "BBBBBBB\n" // "BBBBBBB\n"
+      "B.....B\n" // "B...m.B\n"
+      "B.m.m.B\n" // "B.m..mB\n"
+      "Bm.u.mB\n" // "Bm....B\n"
+      "B..m..B\n" // "B..m.mB\n"
+      "B.....B\n" // "B.....B\n"
+      "BBBBBBB\n" // "BBBBBBB\n"
   ,
   [MapKey_Tutorial] = 
     ".BBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n"
@@ -470,7 +386,7 @@ typedef struct {
 typedef struct {
   uint32_t ent_id_offset;
   void *pointer_offset;
-  size_t table[500];
+  size_t table[100];
 } EntIdTable;
 static EntId eit_p(EntIdTable *eit, void *p) {
   size_t pi = (uint8_t *)p - (uint8_t *)eit->pointer_offset;
@@ -514,9 +430,6 @@ typedef enum {
   SpurtKind_SawMinionDies,
   SpurtKind_SawMasterDies,
   SpurtKind_ShootyThingyAlreadyDead,
-  SpurtKind_MoleChargerDies,
-  SpurtKind_MoleDies,
-  SpurtKind_MolePopsIn,
   SpurtKind_COUNT,
 } SpurtKind;
 typedef struct {
@@ -601,9 +514,7 @@ typedef struct {
   SawMinion saw_minions[10];
   SawMaster saw_master;
 } TutorialState;
-/* - sawmill - */
 
-/* - mole_hole - */
 typedef struct {
   int alive;
   int8_t hole_index;
@@ -614,33 +525,27 @@ typedef struct {
 } MoleCharger;
 typedef enum {
   MoleTunnelState_Init,
-  MoleTunnelState_Waiting,
   MoleTunnelState_PopUp,
   MoleTunnelState_Attack,
   MoleTunnelState_SpawnCharger,
   MoleTunnelState_PopIn,
 } MoleTunnelState;
 typedef struct {
-  MoleTunnelState state;
-  int chargers_to_spawn;
-  double ts_state_start, ts_state_end;
-
-  /* MoleTunnelState_Attack */ int last_attack_mole;
-
-  Mole moles[10];
-  uint8_t _hole_ids[10];
-} MoleTunnel;
-typedef struct {
   Map map;
   EntIdTable eit;
 
-  MoleTunnel tunnels[5];
+  struct {
+    MoleTunnelState state;
+    double ts_state_start, ts_state_end;
+  } tunnel;
 
-  uint8_t hp_pot_collected[10];
-  uint8_t charger_den_triggered[10];
-  MoleCharger chargers[10];
+  /* MoleTunnelState_Attack */ int last_attack_mole;
+
+  MoleCharger chargers[1];
   struct { double ts_start, ts_end;
            struct { float x, y; } start, end; } rocks[50];
+  Mole moles[10];
+  uint8_t _hole_ids[10];
 } MoleHoleState;
 
 Mole *mole_at_hole(Mole *moles, int mole_count, int hole_index) {
@@ -659,28 +564,8 @@ Mole *mole_at_hole_any(Mole *moles, int mole_count) {
   }
   return NULL;
 }
-/* - mole_hole - */
 
-/* - ahquicker - */
-typedef enum {
-  AhqPadState_Init,
-  AhqPadState_Empty,
-  AhqPadState_Mounted,
-} AhqPadState;
-typedef struct {
-  AhqPadState state;
-  /* AhqPadState_Mounted */ EntId rider;
-  float x, y;
-  struct { float x, y; } vel;
-} AhqPad;
-typedef struct {
-  Map map;
-  EntIdTable eit;
-
-  AhqPad pad;
-
-} AhquickerState;
-/* - ahquicker - */
+/* - sawmill - */
 
 /* -- will probably need eventually, --
  * ... but doesn't achieve stated goal: Mole Level.
@@ -754,7 +639,6 @@ typedef struct {
     MapKey map_key;
     TutorialState tutorial;
     MoleHoleState mole_hole;
-    AhquickerState ahquicker;
 
     HitTableEntry hit_table[100];
   } host;
@@ -771,14 +655,14 @@ static State *state(Env *env) {
     /* --- init state --- */
     for (int i = 0; i < 256; i++) state(env)->frametime_ring_buffer[i] = 1/60;
 
-    state(env)->host.next_ent += 550; /* i need some scratch ents for my mad hax */
+    state(env)->host.next_ent += 150; /* i need some scratch ents for my mad hax */
     /* lol tick 0 is special because evals to false (im lazy ok) */
     state(env)->host.tick_count = 1;
 
     state(env)->clnt.seed = 0x5EED;
     state(env)->clnt.ts_last = env->ts();
 
-    state(env)->host.map_key = MapKey_Ahquicker;
+    state(env)->host.map_key = MapKey_MoleHole;
 
     log(env, "sup nerd");
     /* --- init state --- */
@@ -958,27 +842,6 @@ RcxSpurtDesc spurt_kind_descs[SpurtKind_COUNT] = {
     .duration = 1.7f,
     .count = 17,
     .color = 0xFFFFFFFF,
-  },
-  [SpurtKind_MoleChargerDies] = {
-    .form = RcxSpurtForm_Boom,
-    .size = 1.7f,
-    .duration = 1.7f,
-    .count = 12,
-    .color = 0xFFFFFFFF,
-  },
-  [SpurtKind_MoleDies] = {
-    .form = RcxSpurtForm_Boom,
-    .size = 1.3f,
-    .duration = 1.3f,
-    .count = 13,
-    .color = 0xFFFFFFFF,
-  },
-  [SpurtKind_MolePopsIn] = {
-    .form = RcxSpurtForm_Fountain,
-    .size = 0.8f,
-    .duration = 0.5f,
-    .count = 10,
-    .color = 0xFFF5F5DC,
   },
   [SpurtKind_HpPotGulp] = {
     .form = RcxSpurtForm_Fountain,
@@ -1226,6 +1089,11 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     /* clear to black */
     memset(pixels, 0, env->win_size.x * env->win_size.y * sizeof(uint32_t));
 
+    /* checkerboard */
+    for (int y = 0; y < _rcx->size.y; y++)
+      for (int x = 0; x < _rcx->size.x; x++)
+        rcx_p(x, y, (y/4%2 == x/4%2) ? 0x22222222 : 0x33333333);
+
     t_end();
   }
 
@@ -1267,32 +1135,6 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
   _rcx->cfg.origin.y = shake_y;
 
   /* --- world space? --- */
-
-  {
-    t_begin("map water");
-    State *s = state(env);
-
-    int min_x = s->clnt.cam.x;
-    int max_x = s->clnt.cam.x + _rcx->size.x;
-    int min_y = s->clnt.cam.y;
-    int max_y = s->clnt.cam.y + _rcx->size.y;
-    for (int y = min_y; y < max_y; y++)
-      for (int x = min_x; x < max_x; x++) {
-        int tx = map_x_from_world(&s->clnt.map, x);
-        int ty = map_y_from_world(&s->clnt.map, y);
-
-        if (map_in_bounds(&s->clnt.map, tx, ty) &&
-            map_index(&s->clnt.map, tx, ty) == '+')
-          rcx_p(x - min_x, y - min_y, 0xFF405FD0);
-        else {
-          int big = 1 << 12;
-          rcx_p(x - min_x, y - min_y,
-              ((y + big)/4%2 == (x + big)/4%2) ? 0xFF5F4F2F : 0xFF6F5F3F);
-        }
-      }
-
-    t_end();
-  }
 
   /* a quest of self-discovery */
   ClntEnt *you = clnt_ent_you(env);
@@ -1420,8 +1262,9 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     t_end();
   }
 
+  /* draw map */
   {
-    t_begin("map walls");
+    t_begin("map");
     State *s = state(env);
 
     int min_x = s->clnt.cam.x;
@@ -1435,7 +1278,8 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
         if (!map_in_bounds(&s->clnt.map, tx, ty)) continue;
         if (map_index(&s->clnt.map, tx, ty) != 'B') continue;
-        rcx_p(x - min_x, y - min_y, 0xFF403020);
+
+        rcx_p(x - min_x, y - min_y, 0xAA4444AA);
       }
 
     t_end();
@@ -1519,7 +1363,7 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     if (s->clnt.hp_pots) {
       if ((int)(env->ts()*2)%2) _rcx->cfg.text_color = 0xFFFFFFFF;
       char *str = "SPACE TO QUAFF";
-      if (s->clnt.quaff_prog > 0) str = "NOW HOLD IT";
+      if (s->clnt.keysdown[WqVk_Space]) str = "NOW HOLD IT";
 
       rcx_str(_rcx->size.x - scale*(len - 2), scale*2, str);
     }
@@ -1706,25 +1550,9 @@ static int host_ent_ent_collision(HostEntEntCollisionState *heecs) {
 typedef struct {
   struct { int x, y; } normal;
 } HostEntTileCollisionOut;
-typedef struct {
-  Env *env;
-  Map *map;
-  HostEnt *e;
-  char *hard;
-  int move_e;
-} HostEntTileCollisionIn;
-static int host_ent_tile_collision_ex(
-  HostEntTileCollisionIn *in,
-  HostEntTileCollisionOut *out
-) {
-  Env *env = in->env;
-  Map *map = in->map;
-  HostEnt _e, *e = in->e;
-
+static int host_ent_tile_collision(Env *env, Map *map, HostEnt *e, HostEntTileCollisionOut *out) {
   float ex = e->x;
   float ey = e->y;
-  /* HAHaHAAAAAaaaa ... ha */
-  if (!in->move_e) _e = *e, e = &_e;
 
   /* to make this robust:
    *   track tile ent was in last frame
@@ -1754,7 +1582,7 @@ static int host_ent_tile_collision_ex(
     int tx = map_x_from_world(map, ex + offsets[i].x * map_tile_world_size);
     int ty = map_y_from_world(map, ey + offsets[i].y * map_tile_world_size);
     if (!map_in_bounds(map, tx, ty)) continue;
-    if (strchr(in->hard, map_index(map, tx, ty)) != NULL) continue;
+    if (map_index(map, tx, ty) == 'B') continue;
 
     /* find center of tile */
     int cx = map_x_to_world(map, tx) + map_tile_world_size/2;
@@ -1787,7 +1615,7 @@ static int host_ent_tile_collision_ex(
     float dy = ey - cy;
 
     int hit = 0;
-    float he = map_tile_world_size/2;
+    float he =  map_tile_world_size/2;
     if (fabsf(dx) > he) hit = 1, e->x = cx + he * signf(dx);
     if (fabsf(dy) > he) hit = 1, e->y = cy + he * signf(dy);
 
@@ -1797,20 +1625,6 @@ static int host_ent_tile_collision_ex(
     return hit;
   }
   return 0;
-}
-static int host_ent_tile_collision(
-  Env *env, Map *map, HostEnt *e, HostEntTileCollisionOut *out
-) {
-  return host_ent_tile_collision_ex(
-    &(HostEntTileCollisionIn) {
-      .env = env,
-      .map = map,
-      .e = e,
-      .hard = "B",
-      .move_e = 1,
-    },
-    out
-  );
 }
 
 typedef struct {
@@ -1974,41 +1788,39 @@ static void ts_kill_player(Env *env, EntId id) {
   c->tick_state_end   = state(env)->host.tick_count + 2.5f * TICK_SECOND;
 }
 
-static void ts_hurt_player(Env *env, EntId hit_id, float nx, float ny) {
-  HostEnt *hit = host_ent_get(env, hit_id);
-
-  hit->hp -= 1;
-  ts_send_blood(env, hit_id, 0.9f);
-  if (hit->hp <= 0) ts_kill_player(env, hit_id);
-  
-  ts_spurt_nearby(env, map_tile_world_size*3, &(TsSpurt) {
-    .kind = SpurtKind_HitPlayer,
-    .nx   = nx,
-    .ny   = ny,
-    .x    = hit->x,
-    .y    = hit->y,
-  });
-}
-
-static int ts_ent_hurts_player(Env *env, HostEnt *collider, float gx, float gy) {
+static int ts_ent_hurt_player(Env *env, HostEnt *collider, float gx, float gy) {
   HostEntEntCollisionState heecs = { .env = env, .collider = collider };
   while (host_ent_ent_collision(&heecs)) {
     HostEnt *hit = host_ent_get(env, heecs.hit_id);
     if (hit->is_player) {
+      hit->hp -= 1;
+      ts_send_blood(env, heecs.hit_id, 0.9f);
+      if (hit->hp <= 0) ts_kill_player(env, heecs.hit_id);
+      
       float nx = collider->x - gx;
       float ny = collider->y - gy;
       norm(&nx, &ny);
-      ts_hurt_player(env, heecs.hit_id, nx, ny);
+      ts_spurt_nearby(env, map_tile_world_size*3, &(TsSpurt) {
+        .kind = SpurtKind_HitPlayer,
+        .nx   = nx,
+        .ny   = ny,
+        .x    = hit->x,
+        .y    = hit->y,
+      });
+
       return 1;
     }
   }
   return 0;
 }
 
-static void ts_hp_pots(Env *env, Map *map, EntIdTable *eit, uint8_t mem[]) {
+static void ts_hp_pots(Env *env, TutorialState *ts) {
+  EntIdTable *eit = &ts->eit;
+  Map *map = &ts->map;
+
   MapIter mi = { .map = map };
   for (int h_i = 0; map_iter(&mi, 'h'); h_i++) {
-    uint8_t *collected = mem + h_i;
+    uint8_t *collected = ts->hp_pot_collected + h_i;
 
     HostEnt *h_e = host_ent_get(env, eit_p(eit, collected));
     *h_e = (HostEnt) {
@@ -2101,7 +1913,7 @@ static void ts_bouncy_saw_tick(Env *env, TutorialState *ts, BouncySaw *bs, float
       /* ouch! tears clear through ya */
       uint32_t tick = state(env)->host.tick_count;
       int can_hurt = bs->tick_no_hurt_till <= tick;
-      if (can_hurt && ts_ent_hurts_player(env, bse,
+      if (can_hurt && ts_ent_hurt_player(env, bse,
                                          bs->pos.x + bs->vel.x,
                                          bs->pos.y + bs->vel.y))
         bs->tick_no_hurt_till = tick + TICK_SECOND/2;
@@ -2256,7 +2068,7 @@ static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
       fbe->kind = EntKind_Alive;
 
       /* bullets hitting stuff is cool */
-      if (ts_ent_hurts_player(env, fbe, gx, gy))
+      if (ts_ent_hurt_player(env, fbe, gx, gy))
         sm->state = SawMinionState_Think;
 
       if (t < 1.0) break;
@@ -2374,7 +2186,7 @@ static void ts_saw_minion_tick_collision_pass(Env *env, TutorialState *ts, SawMi
   }
 }
 
-static void host_tick_players(Env *env) {
+static void host_tick_players(Env *env, Map *map) {
   State *s = state(env);
   uint32_t tick = s->host.tick_count;
 
@@ -2400,6 +2212,7 @@ static void host_tick_players(Env *env) {
 
         pc_e->x += c->vel.x * speed;
         pc_e->y += c->vel.y * speed;
+        host_ent_tile_collision(env, map, pc_e, NULL);
       } break;
 
       case (ClientState_Dead): {
@@ -2422,257 +2235,6 @@ static void host_tick_players(Env *env) {
 
     }
   }
-}
-
-static int mole_hole_tunnel_tick(
-  Env        *env,
-  MoleHoleState *mh_s, MoleTunnel *tun,
-  char hole_char, int chargers_to_spawn
-) {
-  Map *map = &mh_s->map;
-  EntIdTable *eit = &mh_s->eit;
-
-  int hole_count = 0;
-  for (MapIter mi = { .map = map }; map_iter(&mi, hole_char); hole_count++)
-    ;
-  int mole_count = hole_count - 1;
-
-  int mole_count_living = 0;
-  for (int i = 0; i < mole_count; i++)
-    mole_count_living += tun->moles[i].alive;
-
-  float t = (tun->ts_state_start && tun->ts_state_end)
-    ? inv_lerp(tun->ts_state_start,
-               tun->ts_state_end  ,
-               env->ts())
-    : 0.0f;
-
-  int defeated = (mole_count_living == 0) &&
-    (tun->state != MoleTunnelState_Init);
-  if (!defeated) switch (tun->state) {
-
-    case (MoleTunnelState_Init): {
-      tun->last_attack_mole = -1;
-      for (int i = 0; i < mole_count; i++)
-        tun->moles[i].hole_index = -1,
-        tun->moles[i].alive = 1;
-
-      tun->chargers_to_spawn = chargers_to_spawn;
-      tun->state = MoleTunnelState_Waiting;
-      tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 3.0f;
-    } break;
-
-    case (MoleTunnelState_Waiting): {
-      tun->last_attack_mole = -1;
-
-      for (MapIter mi = { .map = map }; map_iter(&mi, hole_char);) {
-        /* hole is at center of tile */
-        int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-        int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-
-        float dist = 1e9;
-        nearest_player(env, ox, oy, &dist, NULL);
-        if (dist < 1.85f*map_tile_world_size)
-          tun->state = MoleTunnelState_PopUp;
-      }
-    } break;
-
-    case (MoleTunnelState_PopUp): {
-      if (t < 1.0f) break;
-
-      /* find the next mole that needs assigning */
-      Mole *homeless_mole = mole_at_hole(tun->moles, mole_count, -1);
-
-      /* if everyone's assigned, this stage is over */
-      if (!homeless_mole) {
-        tun->state = MoleTunnelState_Attack;
-        tun->ts_state_start = env->ts();
-        tun->ts_state_end   = env->ts() + 0.3f;
-        break;
-      }
-
-      /* find the farthest-from-harm unassigned hole and assign it */
-      int best_hole_i = 0;
-      float best_dist = 0.0f;
-
-      MapIter mi = { .map = map };
-      for (int h_i = 0; map_iter(&mi, hole_char); h_i++) {
-        /* can't give it to you if someone already lives there */
-        if (mole_at_hole(tun->moles, mole_count, h_i))
-          continue;
-
-        /* hole is at center of tile */
-        int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-        int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-        float dist = 1e9;
-        nearest_player(env, ox, oy, &dist, NULL);
-
-        if (dist > best_dist) {
-          best_hole_i = h_i;
-          best_dist = dist;
-        }
-      }
-
-      homeless_mole->hole_index = best_hole_i;
-
-      /* "resetting" this state so there's a wait between mole pop ups */
-      tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 0.295f;
-    } break;
-
-    case (MoleTunnelState_Attack): {
-      if (t < 1.0f) break;
-
-      do {
-        tun->last_attack_mole++;
-      } while (tun->last_attack_mole < mole_count       &&
-               !tun->moles[tun->last_attack_mole].alive);
-
-      if (tun->last_attack_mole >= mole_count) {
-        tun->last_attack_mole = -1;
-        tun->state = MoleTunnelState_SpawnCharger;
-        break;
-      }
-
-      Mole *mole = tun->moles + tun->last_attack_mole;
-      HostEnt *mole_e = host_ent_get(env, eit_p(eit, mole));
-
-      EntId victim_id = -1;
-      nearest_player(env, mole_e->x, mole_e->y, NULL, &victim_id);
-      if (victim_id == -1) break;
-
-      HostEnt *victim = host_ent_get(env, victim_id);
-      for (int i = 0; i < ARR_LEN(mh_s->rocks); i++) {
-        if (env->ts() < mh_s->rocks[i].ts_end) continue;
-        float dx = victim->x - mole_e->x;
-        float dy = victim->y - mole_e->y;
-        norm(&dx, &dy);
-        float secs = 1.95f;
-        mh_s->rocks[i].start.x = mole_e->x;
-        mh_s->rocks[i].start.y = mole_e->y;
-        mh_s->rocks[i].end.x = mole_e->x + dx * map_tile_world_size*0.85f*secs;
-        mh_s->rocks[i].end.y = mole_e->y + dy * map_tile_world_size*0.85f*secs;
-        mh_s->rocks[i].ts_start = env->ts();
-        mh_s->rocks[i].ts_end   = env->ts() + secs;
-        break;
-      }
-
-      tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 0.5f;
-    } break;
-
-    case (MoleTunnelState_SpawnCharger): {
-
-      /* set up the next state, but it ain't over till we break; */
-      tun->state = MoleTunnelState_PopIn;
-      tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 0.1f;
-
-      if (tun->chargers_to_spawn == 0) break;
-      tun->chargers_to_spawn--;
-
-      for (int i = 0; i < ARR_LEN(mh_s->chargers); i++) {
-        MoleCharger *mc = mh_s->chargers + i;
-        if (mc->alive) continue;
-
-        /* find empty hole for charger */
-        MapIter mi = { .map = map };
-        for (int h_i = 0; map_iter(&mi, hole_char); h_i++) {
-          /* can't give it to you if someone already lives there */
-          if (mole_at_hole(tun->moles, mole_count, h_i))
-            continue;
-
-          /* hole is at center of tile */
-          int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-          int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-
-          mc->alive = 1;
-          mc->dir = fmodf(env->ts(), MATH_TAU);
-          mc->x = ox;
-          mc->y = oy;
-          break;
-        }
-        break;
-      }
-    } break;
-
-    case (MoleTunnelState_PopIn): {
-      if (t < 1.0f) break;
-
-      /* find a mole out in the open */
-      Mole *naked_mole = mole_at_hole_any(tun->moles, mole_count);
-
-      /* if everyone's tucked inside, this stage is over */
-      if (!naked_mole) {
-        tun->state = MoleTunnelState_PopUp;
-        tun->ts_state_start = env->ts();
-        tun->ts_state_end   = env->ts() + 0.4f;
-        break;
-      }
-
-      /* hide that sucker */
-      naked_mole->hole_index = -1;
-      ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-        .kind = SpurtKind_MolePopsIn,
-        .x    = host_ent_get(env, eit_p(eit, naked_mole))->x,
-        .y    = host_ent_get(env, eit_p(eit, naked_mole))->y,
-      });
-
-      /* "resetting" this state so there's a wait between mole pop ups */
-      tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 0.275f;
-    } break;
-
-  }
-
-  /* "render" the holes to ents */
-  MapIter mi = { .map = map };
-  for (int h_i = 0; map_iter(&mi, hole_char); h_i++) {
-    int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-    int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-    Mole *guest_mole = mole_at_hole(tun->moles, mole_count, h_i);
-
-    HostEnt *hole_e = host_ent_get(env, eit_p(eit, tun->_hole_ids + h_i));
-    *hole_e = (HostEnt) {
-      .kind = guest_mole ? EntKind_Limbo : EntKind_Alive,
-      .looks = '.',
-      .x = ox, .y = oy,
-    };
-    if (!guest_mole) continue;
-
-    size_t mole_i = guest_mole - tun->moles;
-    HostEnt *mole_e = host_ent_get(env, eit_p(eit, guest_mole));
-    *mole_e = (HostEnt) {
-      .kind = EntKind_Alive,
-      .looks = (tun->last_attack_mole == mole_i) ? 'M' : 'm',
-      .x = ox, .y = oy,
-    };
-
-    /* moles take damage from player here  */
-    HostEntSwordCollisionOut hesco = {0};
-    if (host_ent_sword_collision(env, mole_e, &hesco)) {
-      ts_spurt_nearby_hesco(
-        env, &hesco,
-        map_tile_world_size * 3.0f, SpurtKind_SparkWedge);
-      ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-        .kind = SpurtKind_MoleDies,
-        .x    = mole_e->x,
-        .y    = mole_e->y,
-      });
-
-      guest_mole->alive = 0;
-    }
-  }
-
-  /* "render" (or rather, "unrender") the dead && hidden-in-hole moles */
-  for (int i = 0; i < ARR_LEN(tun->moles); i++) {
-    Mole *mole = tun->moles + i;
-    if (!mole->alive || mole->hole_index == -1)
-      host_ent_get(env, eit_p(eit, mole))->kind = EntKind_Limbo;
-  }
-
-  return defeated;
 }
 
 static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
@@ -2698,43 +2260,173 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
   };
 
   /* tick players */
-  host_tick_players(env);
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = s->host.clients + i;
-    HostEnt *pc_e = host_ent_get(env, c->pc);
-    if (c->state == ClientState_Play)
-      host_ent_tile_collision(env, map, pc_e, NULL);
-  }
-  ts_hp_pots(env, map, eit, mh_s->hp_pot_collected); // ts_hp_pots(env, ts);
+  host_tick_players(env, map);
 
-  mole_hole_tunnel_tick(env, mh_s, mh_s->tunnels+0, 'n', 1);
-  mole_hole_tunnel_tick(env, mh_s, mh_s->tunnels+1, 'o', 1);
-  int beat_boss = 
-    mole_hole_tunnel_tick(env, mh_s, mh_s->tunnels+2, 'm', 3);
+  int hole_count = 0;
+  for (MapIter mi = { .map = map }; map_iter(&mi, 'm'); hole_count++)
+    ;
+  int mole_count = hole_count - 1;
 
-  {
-    int den_i = 0;
-    MapIter mi = { .map = map };
-    for (; map_iter(&mi, 'w'); den_i++) {
-      if (mh_s->charger_den_triggered[den_i]) continue;
+  int mole_count_living = 0;
+  for (int i = 0; i < mole_count; i++) {
+    mole_count_living += moles[i].alive;
 
-      int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-      int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
-      float dist = 1e9;
-      nearest_player(env, ox, oy, &dist, NULL);
-      if (dist < 1.85f*map_tile_world_size)
-        for (int i = 0; i < ARR_LEN(mh_s->chargers); i++) {
-          MoleCharger *mc = mh_s->chargers + i;
-          if (mc->alive) continue;
+  float t = (mh_s->tunnel.ts_state_start && mh_s->tunnel.ts_state_end)
+    ? inv_lerp(mh_s->tunnel.ts_state_start,
+               mh_s->tunnel.ts_state_end  ,
+               env->ts())
+    : 0.0f;
+
+  switch (mh_s->tunnel.state) {
+
+    case (MoleTunnelState_Init): {
+      mh_s->last_attack_mole = -1;
+      for (int i = 0; i < mole_count; i++)
+        mh_s->moles[i].hole_index = -1,
+        mh_s->moles[i].alive = 1;
+      mh_s->tunnel.state = MoleTunnelState_PopUp;
+      mh_s->tunnel.ts_state_start = env->ts();
+      mh_s->tunnel.ts_state_end   = env->ts() + 3.0f;
+    } break;
+
+    case (MoleTunnelState_PopUp): {
+      if (t < 1.0f) break;
+
+      /* find the next mole that needs assigning */
+      Mole *homeless_mole = mole_at_hole(mh_s->moles, mole_count, -1);
+
+      /* if everyone's assigned, this stage is over */
+      if (!homeless_mole) {
+        mh_s->tunnel.state = MoleTunnelState_Attack;
+        mh_s->tunnel.ts_state_start = env->ts();
+        mh_s->tunnel.ts_state_end   = env->ts() + 0.3f;
+        break;
+      }
+
+      /* find the farthest-from-harm unassigned hole and assign it */
+      int best_hole_i = 0;
+      float best_dist = 0.0f;
+
+      MapIter mi = { .map = map };
+      for (int h_i = 0; map_iter(&mi, 'm'); h_i++) {
+        /* can't give it to you if someone already lives there */
+        if (mole_at_hole(mh_s->moles, mole_count, h_i))
+          continue;
+
+        /* hole is at center of tile */
+        int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
+        int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
+        float dist = 1e9;
+        nearest_player(env, ox, oy, &dist, NULL);
+
+        if (dist > best_dist) {
+          best_hole_i = h_i;
+          best_dist = dist;
+        }
+      }
+
+      homeless_mole->hole_index = best_hole_i;
+
+      /* "resetting" this state so there's a wait between mole pop ups */
+      mh_s->tunnel.ts_state_start = env->ts();
+      mh_s->tunnel.ts_state_end   = env->ts() + 0.295f;
+    } break;
+
+    case (MoleTunnelState_Attack): {
+      if (t < 1.0f) break;
+
+      do {
+        mh_s->last_attack_mole++;
+      } while (mh_s->last_attack_mole < mole_count       &&
+               !mh_s->moles[mh_s->last_attack_mole].alive);
+
+      if (mh_s->last_attack_mole >= mole_count) {
+        mh_s->last_attack_mole = -1;
+        mh_s->tunnel.state = MoleTunnelState_SpawnCharger;
+        break;
+      }
+
+      Mole *mole = mh_s->moles + mh_s->last_attack_mole;
+      HostEnt *mole_e = host_ent_get(env, eit_p(eit, mole));
+
+      EntId victim_id = -1;
+      nearest_player(env, mole_e->x, mole_e->y, NULL, &victim_id);
+      if (victim_id == -1) break;
+
+      HostEnt *victim = host_ent_get(env, victim_id);
+      victim->sword = 1;
+      for (int i = 0; i < ARR_LEN(mh_s->rocks); i++) {
+        if (env->ts() < mh_s->rocks[i].ts_end) continue;
+        mh_s->rocks[i].start.x = mole_e->x;
+        mh_s->rocks[i].start.y = mole_e->y;
+        float dx = victim->x - mole_e->x;
+        float dy = victim->y - mole_e->y;
+        norm(&dx, &dy);
+        float secs = 1.95f;
+        mh_s->rocks[i].end.x = dx * map_tile_world_size*0.75f*secs;
+        mh_s->rocks[i].end.y = dy * map_tile_world_size*0.75f*secs;
+        mh_s->rocks[i].ts_start = env->ts();
+        mh_s->rocks[i].ts_end   = env->ts() + secs;
+        break;
+      }
+
+      mh_s->tunnel.ts_state_start = env->ts();
+      mh_s->tunnel.ts_state_end   = env->ts() + 0.5f;
+    } break;
+
+    case (MoleTunnelState_SpawnCharger): {
+
+      for (int i = 0; i < ARR_LEN(mh_s->chargers); i++) {
+        MoleCharger *mc = mh_s->chargers + i;
+        if (mc->alive) continue;
+
+        /* find empty hole for charger */
+        MapIter mi = { .map = map };
+        for (int h_i = 0; map_iter(&mi, 'm'); h_i++) {
+          /* can't give it to you if someone already lives there */
+          if (mole_at_hole(mh_s->moles, mole_count, h_i))
+            continue;
+
+          /* hole is at center of tile */
+          int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
+          int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
 
           mc->alive = 1;
           mc->dir = fmodf(env->ts(), MATH_TAU);
           mc->x = ox;
           mc->y = oy;
-          mh_s->charger_den_triggered[den_i] = 1;
           break;
         }
-    }
+        break;
+      }
+
+      mh_s->tunnel.state = MoleTunnelState_PopIn;
+      mh_s->tunnel.ts_state_start = env->ts();
+      mh_s->tunnel.ts_state_end   = env->ts() + 0.1f;
+    } break;
+
+    case (MoleTunnelState_PopIn): {
+      if (t < 1.0f) break;
+
+      /* find a mole out in the open */
+      Mole *naked_mole = mole_at_hole_any(mh_s->moles, mole_count);
+
+      /* if everyone's tucked inside, this stage is over */
+      if (!naked_mole) {
+        mh_s->tunnel.state = MoleTunnelState_PopUp;
+        mh_s->tunnel.ts_state_start = env->ts();
+        mh_s->tunnel.ts_state_end   = env->ts() + 0.4f;
+        break;
+      }
+
+      /* hide that sucker */
+      naked_mole->hole_index = -1;
+
+      /* "resetting" this state so there's a wait between mole pop ups */
+      mh_s->tunnel.ts_state_start = env->ts();
+      mh_s->tunnel.ts_state_end   = env->ts() + 0.275f;
+    } break;
+
   }
 
   /* charger logic (if you can call it that */
@@ -2769,7 +2461,7 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
       mc->shoot_dir = lerp_rads(mc->shoot_dir, ideal_dir_nofuzz, 0.03f);
     } else {
       mc->dir_vel += lerp_rads(mc->dir, ideal_dir, 0.03f) - mc->dir;
-      mc->dir_vel *= 0.975f;
+      mc->dir_vel *= 0.95f;
       mc->dir += mc->dir_vel;
       mc->shoot_dir = mc->dir;
     }
@@ -2778,12 +2470,12 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
     mc->x += cosf(mc->dir) * (close ? 0.4f : 1.9f);
     mc->y += sinf(mc->dir) * (close ? 0.4f : 1.9f);
 
-    if (tick % (TICK_SECOND) == 0)
+    if (tick % (TICK_SECOND/2) == 0)
       for (int i = 0; i < ARR_LEN(mh_s->rocks); i++) {
         if (env->ts() < mh_s->rocks[i].ts_end) continue;
         float secs = 0.55f;
-        float start = player_world_size * 0.35f;
-        float dist = start + map_tile_world_size*1.35f*secs;
+        float start = player_world_size * 0.65f;
+        float dist = start + map_tile_world_size*1.55f*secs;
         mh_s->rocks[i].start.x = mc->x + cosf(mc->shoot_dir) * start;
         mh_s->rocks[i].start.y = mc->y + sinf(mc->shoot_dir) * start;
         mh_s->rocks[i].end.x   = mc->x + cosf(mc->shoot_dir) * dist;
@@ -2792,6 +2484,42 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
         mh_s->rocks[i].ts_end   = env->ts() + secs;
         break;
       }
+  }
+
+  /* "render" the holes to ents */
+  MapIter mi = { .map = map };
+  for (int h_i = 0; map_iter(&mi, 'm'); h_i++) {
+    int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
+    int oy = map_y_to_world(map, mi.ty) + map_tile_world_size/2;
+    Mole *guest_mole = mole_at_hole(mh_s->moles, mole_count, h_i);
+
+    HostEnt *hole_e = host_ent_get(env, eit_p(eit, mh_s->_hole_ids + h_i));
+    *hole_e = (HostEnt) {
+      .kind = guest_mole ? EntKind_Limbo : EntKind_Alive,
+      .looks = guest_mole ? 'm' : '.',
+      .x = ox, .y = oy,
+    };
+    if (!guest_mole) continue;
+
+    size_t mole_i = guest_mole - mh_s->moles;
+    HostEnt *mole_e = host_ent_get(env, eit_p(eit, guest_mole));
+    *mole_e = (HostEnt) {
+      .kind = EntKind_Alive,
+      .looks = (mh_s->last_attack_mole == mole_i) ? 'M' : 'm',
+      .x = ox, .y = oy,
+    };
+
+    /* moles take damage from player here  */
+    HostEntSwordCollisionOut hesco = {0};
+    if (host_ent_sword_collision(env, mole_e, &hesco))
+      guest_mole->alive = 0;
+  }
+
+  /* "render" (or rather, "unrender") the dead && hidden-in-hole moles */
+  for (int i = 0; i < ARR_LEN(mh_s->moles); i++) {
+    Mole *mole = mh_s->moles + i;
+    if (!mole->alive || mole->hole_index == -1)
+      host_ent_get(env, eit_p(eit, mole))->kind = EntKind_Limbo;
   }
 
   /* "render" rocks */
@@ -2807,13 +2535,6 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
     rock_e->looks = '+';
     rock_e->x = lerp(mh_s->rocks[i].start.x, mh_s->rocks[i].end.x, t);
     rock_e->y = lerp(mh_s->rocks[i].start.y, mh_s->rocks[i].end.y, t);
-
-    /* bullets hitting stuff is cool */
-    float gx = mh_s->rocks[i].end.x;
-    float gy = mh_s->rocks[i].end.y;
-    if (ts_ent_hurts_player(env, rock_e, gx, gy)             ||
-        host_ent_tile_collision(env, &mh_s->map, rock_e, NULL))
-      mh_s->rocks[i].ts_end = env->ts();
   }
 
   /* "render" the chargers */
@@ -2831,26 +2552,11 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
 
     /* chargers take damage from player here  */
     HostEntSwordCollisionOut hesco = {0};
-    if (host_ent_sword_collision(env, chrg_e, &hesco)) {
-      ts_spurt_nearby_hesco(
-        env, &hesco,
-        map_tile_world_size * 3.0f, SpurtKind_SparkWedge);
-      ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
-        .kind = SpurtKind_MoleChargerDies,
-        .x    = chrg_e->x,
-        .y    = chrg_e->y,
-      });
-
+    if (host_ent_sword_collision(env, chrg_e, &hesco))
       mc->alive = 0;
-    }
-    if (host_ent_tile_collision(env, &mh_s->map, chrg_e, NULL))
-      ;
-    mc->x = chrg_e->x;
-    mc->y = chrg_e->y;
   }
 
-  /* door logic */
-  if (beat_boss) {
+  {
     HostEnt *door = host_ent_get(env, eit_pi(eit, map, 1));
 
     MapIter mi = { .map = map };
@@ -2902,16 +2608,10 @@ static void ts_tick(Env *env, TutorialState *ts) {
   eit->ent_id_offset = 50;
 
   /* tick players */
-  host_tick_players(env);
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = s->host.clients + i;
-    HostEnt *pc_e = host_ent_get(env, c->pc);
-    if (c->state == ClientState_Play)
-      host_ent_tile_collision(env, map, pc_e, NULL);
-  }
+  host_tick_players(env, map);
 
   ts_sword(env, ts, eit_p(eit, &ts->sword_collected));
-  ts_hp_pots(env, map, eit, ts->hp_pot_collected); // ts_hp_pots(env, ts);
+  ts_hp_pots(env, ts);
 
   /* find range of X axis values occupied by shooty thingies */
   int shooter_min_x = 1e9, shooter_max_x = 0;
@@ -3269,185 +2969,15 @@ static void ts_tick(Env *env, TutorialState *ts) {
   ts_saw_minion_tick_collision_pass(env, ts, ts->saw_minions, sm_count);
 }
 
-static void ahq_tick(Env *env, AhquickerState *ahq) {
-  State *s = state(env);
-
-  Map *map = &ahq->map;
-  map_init(map, MapKey_Ahquicker);
-  Map stuff_map = {0};
-  map_init(&stuff_map, MapKey_Ahquicker_Stuff);
-
-  EntIdTable *eit = &ahq->eit;
-  eit->pointer_offset = ahq;
-  eit->ent_id_offset = 50;
-
-  uint32_t tick = s->host.tick_count;
-  double sec = (double)tick / (double)TICK_SECOND;
-  float AHQ_PAD_SIZE = player_world_size*1.2f;
-
-  /* lil lost spinny dude */
-  *host_ent_get(env, 0) = (HostEnt) {
-    .kind = EntKind_Alive, 
-    .looks = 'p',
-    .sword = 1,
-    .x = cosf(env->ts()) * 50,
-    .y = sinf(env->ts()) * 50,
-  };
-
-  /* tick players */
-  host_tick_players(env);
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = s->host.clients + i;
-    HostEnt *pc_e = host_ent_get(env, c->pc);
-    if (c->state != ClientState_Play) continue;
-
-    AhqPad *pad = &ahq->pad;
-    char *hard = "B";
-    float dx = pad->x - pc_e->x;
-    float dy = pad->y - pc_e->y;
-    float pad_dist = mag(dx, dy);
-    float pad_size = AHQ_PAD_SIZE;
-
-    if (pad->state == AhqPadState_Empty) {
-      if (pad_dist < pad_size) {
-        pad->state = AhqPadState_Mounted;
-        pad->rider = c->pc;
-      } else {
-        /* you are not standing on a pad, so you cannot walk on water */
-        hard = "B+";
-      }
-    }
-    else if (pad->state == AhqPadState_Mounted) {
-
-      /* propel lily pad when rider swings */
-      if (tick < pc_e->swing.tick_end &&
-          tick > pc_e->swing.tick_start) {
-        pad->vel.x += cosf(pc_e->swing.dir) * 0.3f;
-        pad->vel.y += sinf(pc_e->swing.dir) * 0.3f;
-
-        /* velocity cap the pad (no fun allowed) */
-        float pad_speed = mag(pad->vel.x, pad->vel.y);
-        if (pad_speed < 2.0f) {
-          norm(&pad->vel.x, &pad->vel.y);
-          pad->vel.x *= 1.75f;
-          pad->vel.y *= 1.75f;
-        }
-      }
-
-      /* you cannot dismount unless you are on land */
-      if (pad_dist > pad_size) {
-        HostEntTileCollisionIn hetci = {
-          .env = env,
-          .e = pc_e,
-          .map = map,
-          .hard = ".",
-        };
-        if (host_ent_tile_collision_ex(&hetci, NULL))
-          pad->state = AhqPadState_Empty;
-        else {
-          /* STAY ON THE PAD */
-          norm(&dx, &dy);
-          pc_e->x = pad->x - dx*pad_size;
-          pc_e->y = pad->y - dy*pad_size;
-        }
-      }
-
-      /* basically no matter what you can't walk through walls */
-      HostEntTileCollisionIn hetci = {
-        .env = env,
-        .e = pc_e,
-        .map = map,
-        .hard = hard,
-        .move_e = 1,
-      };
-      host_ent_tile_collision_ex(&hetci, NULL);
-    }
-
-  }
-
-  /* lily pad */
-  MapIter mi = { .map = &stuff_map };
-  AhqPad *pad = &ahq->pad;
-
-  pad->vel.x *= 0.95f;
-  pad->vel.y *= 0.95f;
-  pad->x += pad->vel.x;
-  pad->y += pad->vel.y;
-  HostEnt *rider_e = 0;
-  if (pad->state == AhqPadState_Mounted) {
-    HostEnt *rider_e = host_ent_get(env, pad->rider);
-    if (rider_e)
-      rider_e->x += pad->vel.x*0.6f,
-      rider_e->y += pad->vel.y*0.6f;
-    else
-      pad->state = AhqPadState_Empty;
-  }
-
-  /* initialize pad */
-  if (pad->state == AhqPadState_Init && map_iter(&mi, 'O')) {
-    /* lily pad is a bit past top of tile */
-    int ox = map_x_to_world(map, mi.tx) + map_tile_world_size/2;
-    int oy = map_y_to_world(map, mi.ty) + map_tile_world_size + player_world_size;
-    pad->x = ox;
-    pad->y = oy;
-    pad->state = AhqPadState_Empty;
-  }
-
-  HostEnt *pad_e = host_ent_get(env, eit_p(eit, pad));
-  *pad_e = (HostEnt) {
-    .kind = EntKind_Alive,
-    .looks = 'O',
-    .x = pad->x,
-    .y = pad->y,
-  };
-  /* auxiliary boundary indicator ents */
-  int MAX = 5;
-  for (int n = 0; n < MAX; n++) {
-    float theta = ((float)n/(float)MAX) * MATH_TAU;
-    float     r =                         AHQ_PAD_SIZE;
-
-    *host_ent_get(env, eit_pi(eit, pad, 1+n)) = (HostEnt) {
-      .kind = EntKind_Alive, 
-      .looks = '.',
-      .x = cosf(theta)*r + pad->x,
-      .y = sinf(theta)*r + pad->y,
-    };
-  }
-
-  /* now that we have Ent, we can use collision detection */
-  HostEntTileCollisionOut hetco = {0};
-  HostEntTileCollisionIn hetci = {
-    .env = env,
-    .e = pad_e,
-    .move_e = 1,
-    .map = map,
-    /* pads cant go off water */
-    .hard = ".B",
-  };
-  /* pads bounce off of water with reduced speed */
-  if (host_ent_tile_collision_ex(&hetci, &hetco)) {
-    float speed = mag(pad->vel.x, pad->vel.y) * 0.8f;
-    reflect(&pad->vel.x,
-            &pad->vel.y,
-                        hetco.normal.x,
-                        hetco.normal.y);
-    norm(&pad->vel.x,
-         &pad->vel.y);
-    pad->vel.x *= speed;
-    pad->vel.y *= speed;
-  }
-  /* okay we don't actually want to render that one, its ugly */
-  pad_e->looks = EntKind_Limbo;
-}
-
 static void host_tick(Env *env) {
   State *s = state(env);
   uint32_t tick = s->host.tick_count;
 
-  /* map-specific logic */
-  if (s->host.map_key == MapKey_Tutorial)  ts_tick(       env, &s->host.tutorial );
-  if (s->host.map_key == MapKey_MoleHole)  mole_hole_tick(env, &s->host.mole_hole);
-  if (s->host.map_key == MapKey_Ahquicker) ahq_tick(      env, &s->host.ahquicker);
+  /* tutorial level logic */
+  if (s->host.map_key == MapKey_Tutorial)
+    ts_tick(env, &s->host.tutorial);
+  if (s->host.map_key == MapKey_MoleHole)
+    mole_hole_tick(env, &s->host.mole_hole);
 
   /* broadcast to ERRYBUDDY */
   ToClntMsg msg = {
@@ -3569,8 +3099,8 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
       .kind = EntKind_Alive,
       .looks = 'p',
       .is_player = 1,
-      // .max_hp = 3, .hp = 3,
-      .max_hp = 4, .hp = 4, .sword = 1,
+      .max_hp = 3,
+      .hp = 3,
       .x = 0,
       .y = 0,
     };
