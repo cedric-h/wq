@@ -8,6 +8,32 @@
 #include "wq.h"
 #include "font.h"
 
+/* [ ] use Rock * in sawmill
+ * remove use of env->ts() for host timing
+ * make Ahquicker slightly longer
+ * add signaling b4 attack to 'w's, 'e's && 'm's
+ * gradual health regen
+ * interpolation
+ * 
+ * bugs:
+ *   can hold more than 3 hp_pots
+ *   sometimes sawminions linger during sucking,
+ *   sometimes sawminions teleport at start of knockback
+ *
+ * combat enhancements ???
+ *   "rage" bar that tracks combos?
+ *   - increase speed proportional to rage
+ *
+ *   add "magic" bar, special attacks?
+ *
+ *
+ *   rage for combos simply increases speed
+ *   can acquire sashes that change what rage does?
+ *   e.g. more rage, chance to reflect bullets
+ *        more rage, quicker attacks
+ *        sash where proximity to bullets gives rage
+ */
+
 /* TODO: worry about this eventually
  *   https://stackoverflow.com/questions/2782725/converting-float-values-from-big-endian-to-little-endian/2782742#2782742
  * and all the host stuff that uses ts instead of ticks
@@ -863,6 +889,7 @@ typedef struct {
 
   struct {
     Map map;
+    MapKey map_key;
 
     double ts_last;
     uint32_t last_known_tick;
@@ -923,7 +950,7 @@ static State *state(Env *env) {
     state(env)->clnt.seed = 0x5EED;
     state(env)->clnt.ts_last = env->ts();
 
-    state(env)->host.map_key = MapKey_Ahquicker;
+    state(env)->host.map_key = MapKey_Tutorial;
 
     log(env, "sup nerd");
     /* --- init state --- */
@@ -1739,6 +1766,13 @@ static HostEnt *host_ent_get(Env *env, EntId id) {
 static EntId host_ent_id(Env *env, HostEnt *e) {
   return e - state(env)->host.ents;
 }
+static void eit_zero_out_host_ents(EntIdTable *eit, Env *env) {
+  for (int i = 0; i < ARR_LEN(eit->table); i++)
+    if (eit->table[i] > 0) {
+      HostEnt *e = host_ent_get(env, i + eit->ent_id_offset);
+      if (e) *e = (HostEnt) {0};
+    }
+}
 
 static void host_rock_to_ent(Env *env, EntIdTable *eit, Map *map, Rock *rock) {
   HostEnt *rock_e = host_ent_get(env, eit_p(eit, rock));
@@ -2203,6 +2237,33 @@ static void ts_hp_pots(Env *env, Map *map, EntIdTable *eit, uint8_t mem[]) {
       c->hp_pots++;
       *collected = 1;
       break;
+    }
+  }
+}
+
+static void map_door_tick(Env *env, Map *map, EntIdTable *eit, EntId id, MapKey next) {
+  HostEnt *door = host_ent_get(env, id);
+
+  MapIter mi = { .map = map };
+  if (map_iter(&mi, 'd')) {
+    /* pos is center of the tile */
+    *door = (HostEnt) {
+      .kind = EntKind_Alive,
+      .looks = 'd',
+      .x = map_x_to_world(map, mi.tx) + map_tile_world_size/2,
+      .y = map_y_to_world(map, mi.ty) + map_tile_world_size/2,
+    };
+
+    HostEntEntCollisionState heecs = { .env = env, .collider = door };
+    while (host_ent_ent_collision(&heecs)) {
+      HostEnt *hit = host_ent_get(env, heecs.hit_id);
+
+      if (hit->is_player) {
+        hit->x = hit->y = 0;
+        state(env)->host.map_key = next;
+        eit_zero_out_host_ents(eit, env);
+        return;
+      }
     }
   }
 }
@@ -3006,31 +3067,8 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
   }
 
   /* door logic */
-  if (beat_boss) {
-    HostEnt *door = host_ent_get(env, eit_pi(eit, map, 1));
-
-    MapIter mi = { .map = map };
-    if (map_iter(&mi, 'd')) {
-      /* pos is center of the tile */
-      *door = (HostEnt) {
-        .kind = EntKind_Alive,
-        .looks = 'd',
-        .x = map_x_to_world(map, mi.tx) + map_tile_world_size/2,
-        .y = map_y_to_world(map, mi.ty) + map_tile_world_size/2,
-      };
-
-      HostEntEntCollisionState heecs = { .env = env, .collider = door };
-      while (host_ent_ent_collision(&heecs)) {
-        HostEnt *hit = host_ent_get(env, heecs.hit_id);
-
-        if (hit->is_player) {
-          hit->x = hit->y = 0;
-          s->host.map_key = MapKey_Tutorial;
-          return;
-        }
-      }
-    }
-  }
+  if (beat_boss)
+    map_door_tick(env, map, eit, eit_pi(eit, map, 1), MapKey_Ahquicker);
 }
 
 static void ts_tick(Env *env, TutorialState *ts) {
@@ -3376,6 +3414,28 @@ static void ts_tick(Env *env, TutorialState *ts) {
         sm->bouncy_saw_count = 0;
         sm->minion_count = 0;
         sme->looks = '.';
+
+        HostEnt *door = sme;
+
+        *door = (HostEnt) {
+          .kind = EntKind_Alive,
+          .looks = 'd',
+          .x = ox,
+          .y = oy,
+        };
+
+        HostEntEntCollisionState heecs = { .env = env, .collider = door };
+        while (host_ent_ent_collision(&heecs)) {
+          HostEnt *hit = host_ent_get(env, heecs.hit_id);
+
+          if (hit->is_player) {
+            hit->x = hit->y = 0;
+            /* beat "sawmill" tutorial, now go to ... */
+            s->host.map_key = MapKey_MoleHole;
+            eit_zero_out_host_ents(eit, env);
+            return;
+          }
+        }
       } break;
     }
 
@@ -4127,6 +4187,8 @@ SKIP:
   /* "render" rocks */
   for (int i = 0; i < ARR_LEN(ahq->rocks); i++)
     host_rock_to_ent(env, eit, &ahq->map, ahq->rocks + i);
+
+  map_door_tick(env, &stuff_map, eit, eit_pi(eit, map, 1), MapKey_Tutorial);
 }
 
 static void host_tick(Env *env) {
@@ -4134,9 +4196,13 @@ static void host_tick(Env *env) {
   uint32_t tick = s->host.tick_count;
 
   /* map-specific logic */
+  MapKey map_keyb4 = s->host.map_key;
   if (s->host.map_key == MapKey_Tutorial)  ts_tick(       env, &s->host.tutorial );
   if (s->host.map_key == MapKey_MoleHole)  mole_hole_tick(env, &s->host.mole_hole);
   if (s->host.map_key == MapKey_Ahquicker) ahq_tick(      env, &s->host.ahquicker);
+  /* broadcasting updates from a map that just changed creates artifacts */
+  if (map_keyb4 != s->host.map_key)
+    return;
 
   /* broadcast to ERRYBUDDY */
   ToClntMsg msg = {
@@ -4258,8 +4324,8 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
       .kind = EntKind_Alive,
       .looks = 'p',
       .is_player = 1,
-      // .max_hp = 3, .hp = 3,
-      .max_hp = 4, .hp = 4, .sword = 1,
+      .max_hp = 5, .hp = 5,
+      // .max_hp = 4, .hp = 4, .sword = 1,
       .x = 0,
       .y = 0,
     };
@@ -4348,7 +4414,12 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
   if (msg->kind == ToClntMsgKind_Ping)
     log(env, "got host Ping!");
   if (msg->kind == ToClntMsgKind_Map) {
-    map_init(&state(env)->clnt.map, msg->map);
+    State *s = state(env);
+    if (msg->map != s->clnt.map_key) {
+      s->clnt.map_key = msg->map;
+      memset(s->clnt.ents, 0, sizeof(s->clnt.ents));
+    }
+    map_init(&s->clnt.map, msg->map);
 
     // ToHostMsg msg = { .kind = ToHostMsgKind_Ack };
     // env->send_to_host((void *)&msg, sizeof(msg));
