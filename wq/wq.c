@@ -1,12 +1,45 @@
 // vim: sw=2 ts=2 expandtab smartindent
-#include <stdio.h>
-
-#define t_begin(str) env->trace_begin((str), sizeof(str))
+// #include <stdio.h>
+// #include <math.h>
+#define t_begin(str) env->trace_begin((char *)(str), sizeof(str))
 #define t_end() env->trace_end()
 #define ARR_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #include "wq.h"
 #include "font.h"
+
+#ifdef __wasm__
+extern void print(char *, size_t);
+extern void print_f(float f);
+extern float fmodf(float f, float n);
+extern float sqrtf(float f);
+extern float cosf(float f);
+extern float sinf(float f);
+extern float floorf(float f);
+extern float ceilf(float f);
+extern float atan2f(float f, float n);
+static size_t strlen(const char *str) {
+  size_t len = 0;
+
+  if (str)
+    for (int i = 0; str[i]; i++)
+      len++;
+
+  return len;
+}
+static char *strchr(const char *str, int c) {
+  char *s = 0;
+
+  for (size_t i = 0; i <= strlen(str); i++) {
+    if (str[i] == c)
+      s = ((char *)str) + i;
+    break;
+  }
+
+  return s;
+}
+#endif
+
 
 /* [ ] use Rock * in sawmill
  * remove use of env->ts() for host timing
@@ -932,12 +965,17 @@ typedef struct {
   } host;
 
 } State;
+INIT_HACK(State)
 
 /* can't use static because DLL constantly reloading */
 static State *state(Env *env) {
   if (env->stash.buf == NULL || env->stash.len < sizeof(State)) {
+#ifdef __wasm__
+    env->stash.buf = __stash_buf;
+#else
     if (env->stash.buf) free(env->stash.buf);
     env->stash.buf = calloc(sizeof(State), 1);
+#endif
     env->stash.len = sizeof(State);
 
     /* --- init state --- */
@@ -977,6 +1015,11 @@ static ClntEnt *clnt_ent_you(Env *env) {
 
 
 /* --- log --- */
+#ifdef __wasm__
+static void log(Env *env, char *p) {
+  print(p, strlen(p));
+}
+#else
 static void log(Env *env, char *p) {
   int len = strlen(p);
 
@@ -989,6 +1032,7 @@ static void log(Env *env, char *p) {
   /* copy in payload after header */
   memcpy((uint8_t *)ln + sizeof(LogNodeHeader), p, len);
 }
+#endif
 /* --- log --- */
 
 
@@ -1008,9 +1052,9 @@ typedef struct {
 } Rcx;
 
 static inline uint32_t rcx_color(int r, int g, int b) {
-  return (r << 0) & 0x000000FF |
-         (g << 4) & 0x0000FF00 |
-         (b << 8) & 0x00FF0000 ;
+  return ((r << 0) & 0x000000FF) |
+         ((g << 4) & 0x0000FF00) |
+         ((b << 8) & 0x00FF0000) ;
 }
 static inline void rcx_decompose(uint32_t c, int *r, int *g, int *b) {
   *r = (c & 0x000000FF) >> 0;
@@ -1238,7 +1282,7 @@ static void rcx_char(int px, int py, int scale, char c) {
 static void rcx_str_cursor(int *x, int *y, char *str) {
   int start = *x;
   int scale = _rcx->cfg.text_size;
-  for (; *str; *str++) {
+  for (; *str; str++) {
 
     if (*x > (_rcx->size.x-2*8*scale) || *str == '\n')
       *y -= 8*scale,
@@ -1551,9 +1595,9 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
           int on = i == 0 || i == (bar_len-1) ||
             (((float)i / (float)bar_len) < ((float)e->hp / (float)e->max_hp));
 
-                  rcx_p(dx + px + i, y + 0, 0xFF00FF00);
+          if ( 1) rcx_p(dx + px + i, y + 0, 0xFF00FF00);
           if (on) rcx_p(dx + px + i, y + 1, 0xFF00FF00);
-                  rcx_p(dx + px + i, y + 2, 0xFF00FF00);
+          if ( 1) rcx_p(dx + px + i, y + 2, 0xFF00FF00);
         }
       }
     }
@@ -1678,6 +1722,9 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
     for (int i = 0; i < 256; i++) average += s->frametime_ring_buffer[i];
     average /= s->frametime_ring_len;
 
+    int len = 20;
+    int scale = 8*(_rcx->cfg.text_size = 1);
+#ifndef __wasm__
     char buf[32] = {0};
     snprintf(
       buf, sizeof(buf),
@@ -1685,15 +1732,14 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
       1000*average, _rcx->size.x, _rcx->size.y
     );
 
-    int scale = 8*(_rcx->cfg.text_size = 1);
     rcx_str(_rcx->size.x - scale*10,
             _rcx->size.y - scale*2, buf);
 
-    int len = 20;
     memset(buf, 0, sizeof(buf));
     snprintf(buf, len, "%d/3 health potions", s->clnt.hp_pots);
     rcx_str(_rcx->size.x - scale*len,
                            scale*1, buf);
+#endif
 
     if (s->clnt.hp_pots) {
       if ((int)(env->ts()*2)%2) _rcx->cfg.text_color = 0xFFFFFFFF;
@@ -1774,39 +1820,6 @@ static void eit_zero_out_host_ents(EntIdTable *eit, Env *env) {
     }
 }
 
-static void host_rock_to_ent(Env *env, EntIdTable *eit, Map *map, Rock *rock) {
-  HostEnt *rock_e = host_ent_get(env, eit_p(eit, rock));
-  *rock_e = (HostEnt) { .kind = EntKind_Limbo };
-
-  if (rock->ts_end < env->ts()) return;
-  float t = inv_lerp(rock->ts_start,
-                     rock->ts_end  ,
-                     env->ts());
-  rock_e->kind = EntKind_Alive;
-  rock_e->looks = '+';
-  rock_e->x = lerp(rock->start.x, rock->end.x, t);
-  rock_e->y = lerp(rock->start.y, rock->end.y, t);
-
-  /* bullets hitting stuff is cool */
-  float gx = rock->end.x;
-  float gy = rock->end.y;
-  if (ts_ent_hurts_player(env, rock_e, gx, gy)             ||
-      host_ent_tile_collision(env, map, rock_e, NULL))
-    rock->ts_end = env->ts();
-}
-
-/* find Client * associated with this EntId */
-static Client *host_ent_client(Env *env, EntId id) {
-  for (int i = 0; i < CLIENTS_MAX; i++) {
-    Client *c = state(env)->host.clients + i;
-    if (c->state == ClientState_Inactive) continue;
-    if (c->pc != id) continue;
-
-    return c;
-  }
-  return NULL;
-}
-
 /* how many ticks in a second? */
 #define TICK_SECOND (20)
 
@@ -1817,7 +1830,9 @@ static int host_hit_table_debounce(Env *env, EntId dealt_by, EntId dealt_to) {
   State *s = state(env);
   uint32_t tick = s->host.tick_count;
 
-  for (int i = 0; i < ARR_LEN(s->host.hit_table); i++) {
+  int len = ARR_LEN(s->host.hit_table);
+
+  for (int i = 0; i < len; i++) {
     HitTableEntry *hte = s->host.hit_table + i;
     if (hte->tick_until < tick) continue;
 
@@ -1825,7 +1840,7 @@ static int host_hit_table_debounce(Env *env, EntId dealt_by, EntId dealt_to) {
       return 0;
   }
 
-  for (int i = 0; i < ARR_LEN(s->host.hit_table); i++) {
+  for (int i = 0; i < len; i++) {
     HitTableEntry *hte = s->host.hit_table + i;
 
     if (hte->tick_until < tick) {
@@ -1842,48 +1857,6 @@ static int host_hit_table_debounce(Env *env, EntId dealt_by, EntId dealt_to) {
   return 0;
 }
 
-/* to client */
-typedef enum {
-  ToClntMsgKind_Ping,
-  ToClntMsgKind_Map,
-  ToClntMsgKind_EntUpd,
-  ToClntMsgKind_HpPots,
-  ToClntMsgKind_Swing,
-  ToClntMsgKind_BloodSecs,
-  ToClntMsgKind_ShakeSecs,
-  ToClntMsgKind_Spurt,
-} ToClntMsgKind;
-
-typedef struct {
-  ToClntMsgKind kind;
-  union {
-    /* _Map    */ MapKey map;
-    /* _EntUpd */ struct { EntId id; uint32_t tick; EntUpd ent; } ent_upd;
-    /* _Swing  */ struct { EntId id; uint32_t tick; float dir; double secs; } swing;
-    /* _HpPots */ struct { float quaff_prog; uint16_t hp_pots; } hp_pots;
-
-    /* blood, sex ... what kind of game am I making?!?? */
-    /* _BloodSecs */ float add_blood_secs;
-    /* _ShakeSecs */ float add_shake_secs;
-    /* _Spurt */ struct { SpurtKind kind; float x, y, angle; } spurt;
-  };
-} ToClntMsg;
-
-/* to host */
-typedef enum {
-  ToHostMsgKind_Ping,
-  ToHostMsgKind_Move,
-  ToHostMsgKind_Swing,
-  ToHostMsgKind_Quaff,
-} ToHostMsgKind;
-
-typedef struct {
-  ToHostMsgKind kind;
-  union {
-    /* ToHostMsgKind_Move  */ struct { float x, y; } move;
-    /* ToHostMsgKind_Swing */ struct { float dir; } swing;
-  };
-} ToHostMsg;
 
 typedef struct {
   Env *env;
@@ -1924,7 +1897,6 @@ static int host_ent_tile_collision_ex(
   HostEntTileCollisionIn *in,
   HostEntTileCollisionOut *out
 ) {
-  Env *env = in->env;
   Map *map = in->map;
   HostEnt _e, *e = in->e;
 
@@ -2096,12 +2068,68 @@ static int host_ent_sword_collision(Env *env, HostEnt *p, HostEntSwordCollisionO
         }
         EntId p_id = host_ent_id(env, p);
         EntId e_id = host_ent_id(env, e);
-        return host_hit_table_debounce(env, p_id, e_id);
+        return host_hit_table_debounce(env, e_id, p_id);
       }
     }
   }
   return 0;
 }
+
+
+/* find Client * associated with this EntId */
+static Client *host_ent_client(Env *env, EntId id) {
+  for (int i = 0; i < CLIENTS_MAX; i++) {
+    Client *c = state(env)->host.clients + i;
+    if (c->state == ClientState_Inactive) continue;
+    if (c->pc != id) continue;
+
+    return c;
+  }
+  return NULL;
+}
+
+/* to client */
+typedef enum {
+  ToClntMsgKind_Ping,
+  ToClntMsgKind_Map,
+  ToClntMsgKind_EntUpd,
+  ToClntMsgKind_HpPots,
+  ToClntMsgKind_Swing,
+  ToClntMsgKind_BloodSecs,
+  ToClntMsgKind_ShakeSecs,
+  ToClntMsgKind_Spurt,
+} ToClntMsgKind;
+
+typedef struct {
+  ToClntMsgKind kind;
+  union {
+    /* _Map    */ MapKey map;
+    /* _EntUpd */ struct { EntId id; uint32_t tick; EntUpd ent; } ent_upd;
+    /* _Swing  */ struct { EntId id; uint32_t tick; float dir; double secs; } swing;
+    /* _HpPots */ struct { float quaff_prog; uint16_t hp_pots; } hp_pots;
+
+    /* blood, sex ... what kind of game am I making?!?? */
+    /* _BloodSecs */ float add_blood_secs;
+    /* _ShakeSecs */ float add_shake_secs;
+    /* _Spurt */ struct { SpurtKind kind; float x, y, angle; } spurt;
+  };
+} ToClntMsg;
+
+/* to host */
+typedef enum {
+  ToHostMsgKind_Ping,
+  ToHostMsgKind_Move,
+  ToHostMsgKind_Swing,
+  ToHostMsgKind_Quaff,
+} ToHostMsgKind;
+
+typedef struct {
+  ToHostMsgKind kind;
+  union {
+    /* ToHostMsgKind_Move  */ struct { float x, y; } move;
+    /* ToHostMsgKind_Swing */ struct { float dir; } swing;
+  };
+} ToHostMsg;
 
 static void ts_send_blood(Env *env, EntId id, float secs) {
   Client *c = host_ent_client(env, id);
@@ -2173,7 +2201,7 @@ static void ts_shake_nearby(Env *env, float x, float y, float dist, float secs) 
 }
 static void ts_kill_player(Env *env, EntId id) {
   Client *c = host_ent_client(env, id);
-  HostEnt *e = host_ent_get(env, id);
+  // HostEnt *e = host_ent_get(env, id);
   if (!c) return;
 
   c->state = ClientState_Dead;
@@ -2210,6 +2238,27 @@ static int ts_ent_hurts_player(Env *env, HostEnt *collider, float gx, float gy) 
     }
   }
   return 0;
+}
+
+static void host_rock_to_ent(Env *env, EntIdTable *eit, Map *map, Rock *rock) {
+  HostEnt *rock_e = host_ent_get(env, eit_p(eit, rock));
+  *rock_e = (HostEnt) { .kind = EntKind_Limbo };
+
+  if (rock->ts_end < env->ts()) return;
+  float t = inv_lerp(rock->ts_start,
+                     rock->ts_end  ,
+                     env->ts());
+  rock_e->kind = EntKind_Alive;
+  rock_e->looks = '+';
+  rock_e->x = lerp(rock->start.x, rock->end.x, t);
+  rock_e->y = lerp(rock->start.y, rock->end.y, t);
+
+  /* bullets hitting stuff is cool */
+  float gx = rock->end.x;
+  float gy = rock->end.y;
+  if (ts_ent_hurts_player(env, rock_e, gx, gy)             ||
+      host_ent_tile_collision(env, map, rock_e, NULL))
+    rock->ts_end = env->ts();
 }
 
 static void ts_hp_pots(Env *env, Map *map, EntIdTable *eit, uint8_t mem[]) {
@@ -2573,7 +2622,7 @@ static void ts_saw_minion_tick(SawMinion *sm, TsSawMinionTickIn *in) {
 
 static void ts_saw_minion_tick_collision_pass(Env *env, TutorialState *ts, SawMinion sms[], int count) {
   EntIdTable *eit = &ts->eit;
-  Map *map = &ts->map;
+  // Map *map = &ts->map;
 
   for (int sm_i = 0; sm_i < count; sm_i++) {
     HostEnt *sme = host_ent_get(env, eit_p(eit, sms + sm_i));
@@ -2654,6 +2703,8 @@ static void host_tick_players(Env *env) {
         pc_e->hp = pc_e->max_hp;
         c->state = ClientState_Play;
       } break;
+
+      default: break;
 
     }
   }
@@ -2920,7 +2971,6 @@ static void mole_hole_tick(Env *env, MoleHoleState *mh_s) {
   eit->ent_id_offset = 50;
 
   uint32_t tick = s->host.tick_count;
-  double sec = (double)tick / (double)TICK_SECOND;
 
   /* lil lost spinny dude */
   *host_ent_get(env, 0) = (HostEnt) {
@@ -3192,7 +3242,6 @@ static void ts_tick(Env *env, TutorialState *ts) {
     /* how far along is bullet on its journey? */
     float difficulty = inv_lerp(shooter_min_x, shooter_max_x, mi.tx);
     double cycle = sec / lerp(1.0f, 0.8f, difficulty);
-    float t = fmodf(cycle, 1.0f);
 
     /* ok now fireball, yeet it into enthood */
     EntId fb_id = fb_id0 + fb_i*2;
@@ -3649,7 +3698,6 @@ static void ahq_tick(Env *env, AhquickerState *ahq) {
   eit->ent_id_offset = 50;
 
   uint32_t tick = s->host.tick_count;
-  double sec = (double)tick / (double)TICK_SECOND;
   float AHQ_PAD_SIZE = player_world_size*1.2f;
 
   /* lil lost spinny dude */
@@ -3982,7 +4030,9 @@ static void ahq_tick(Env *env, AhquickerState *ahq) {
               rock->ts_end   = env->ts() + secs;
             }
           // }
-       } break;
+        } break;
+
+        default: break;
       }
 
       HostEnt *al_e = host_ent_get(env, al_id);
@@ -4058,7 +4108,6 @@ static void ahq_tick(Env *env, AhquickerState *ahq) {
     pad->vel.y *= 0.95f;
     pad->x += pad->vel.x;
     pad->y += pad->vel.y;
-    HostEnt *rider_e = 0;
     /* drag rider - quadratic perf goes weeee */
     int riders = 0;
     for (int i = 0; i < WQ_ENTS_MAX; i++) {
@@ -4077,8 +4126,6 @@ static void ahq_tick(Env *env, AhquickerState *ahq) {
         riders++,
         e->x += pad->vel.x*0.8f,
         e->y += pad->vel.y*0.8f;
-SKIP:
-      ;
     }
     if (riders > 0)
       pad->tick_last_ridden = tick;
@@ -4411,6 +4458,19 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
   s->clnt.am_connected = 1;
 
   ToClntMsg *msg = (ToClntMsg *)buf;
+#if 0
+  switch (msg->kind) {
+  case ToClntMsgKind_Ping:      log(env, "ToClntMsgKind_Ping"); break;
+  case ToClntMsgKind_Map:       log(env, "ToClntMsgKind_Map"); break;
+  case ToClntMsgKind_EntUpd:    log(env, "ToClntMsgKind_EntUpd"); break;
+  case ToClntMsgKind_HpPots:    log(env, "ToClntMsgKind_HpPots"); break;
+  case ToClntMsgKind_Swing:     log(env, "ToClntMsgKind_Swing"); break;
+  case ToClntMsgKind_BloodSecs: log(env, "ToClntMsgKind_BloodSecs"); break;
+  case ToClntMsgKind_ShakeSecs: log(env, "ToClntMsgKind_ShakeSecs"); break;
+  case ToClntMsgKind_Spurt:     log(env, "ToClntMsgKind_Spurt"); break;
+  }
+#endif
+
   if (msg->kind == ToClntMsgKind_Ping)
     log(env, "got host Ping!");
   if (msg->kind == ToClntMsgKind_Map) {
@@ -4501,7 +4561,7 @@ EXPORT void wq_update(Env *env) {
     }
   }
 
-  /* keystate has changed, recompute heading and update server */
+  /* even if no keystate has changed, recompute heading and update server */
   if (s->clnt.am_connected) {
     ToHostMsg msg = {
       .kind = ToHostMsgKind_Move,
@@ -4563,6 +4623,7 @@ EXPORT void wq_mousebtn(Env *env, int down) {
 EXPORT void wq_keyboard(Env *env, char c, int down) {
   State *s = state(env);
 
+#ifndef __wasm__
   if (c == WqVk_Esc  ) {
     log(env, "restarting everything");
 
@@ -4570,6 +4631,7 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
     env->stash.buf = NULL;
     state(env);
   }
+#endif
 
   // char str[256] = {0};
   // sprintf(str, "you pressed %d", c);
@@ -4595,7 +4657,7 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
   }
 
 
-  s->clnt.keysdown[c] = down;
+  s->clnt.keysdown[(int)c] = down;
 
 }
 /* --- input --- */
