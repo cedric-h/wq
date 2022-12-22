@@ -41,12 +41,15 @@ static char *strchr(const char *str, int c) {
 #endif
 
 
-/* [ ] use Rock * in sawmill
+/* test multiplayer
+ * interpolation
+ * support multiple instances of maps
+ *
+ * [ ] use Rock * in sawmill
  * remove use of env->ts() for host timing
  * make Ahquicker slightly longer
  * add signaling b4 attack to 'w's, 'e's && 'm's
  * gradual health regen
- * interpolation
  * 
  * bugs:
  *   can hold more than 3 hp_pots
