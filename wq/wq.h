@@ -214,7 +214,7 @@ static wq_DylibHook wq_dylib_hook_init(void) {
     uint32_t stride = 0;
 
 #define INIT_HACK(State)                                               \
-    WASM_EXPORT uint32_t *init(int width, int height) {                \
+    WASM_EXPORT uint32_t *init(int width, int height, int host) {      \
       _env->win_size.x = width;                                        \
       _env->win_size.y = height;                                       \
       stride = width;                                                  \
@@ -229,6 +229,9 @@ static wq_DylibHook wq_dylib_hook_init(void) {
       if (delta > 0) __builtin_wasm_memory_grow(0, delta);             \
                                                                        \
       __stash_buf = &__heap_base + pixel_bytes;                        \
+      /* no pixels, no client */                                       \
+      ((State *)__stash_buf)->no_clnt = !(width && height);            \
+      ((State *)__stash_buf)->am_host = host;                          \
       return pixels;                                                   \
     }
 

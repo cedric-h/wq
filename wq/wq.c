@@ -923,6 +923,7 @@ typedef struct {
   int frametime_ring_index, frametime_ring_len;
   /* --- dbg --- */
 
+  int no_clnt;
   struct {
     Map map;
     MapKey map_key;
@@ -2855,7 +2856,7 @@ static int mole_hole_tunnel_tick(
       /* set up the next state, but it ain't over till we break; */
       tun->state = MoleTunnelState_PopIn;
       tun->ts_state_start = env->ts();
-      tun->ts_state_end   = env->ts() + 0.1f;
+      tun->ts_state_end   = env->ts() + 0.4f;
 
       if (tun->chargers_to_spawn == 0) break;
       tun->chargers_to_spawn--;
@@ -4549,7 +4550,7 @@ EXPORT void wq_update(Env *env) {
   State *s = state(env);
 
   /* better get yourself connected */
-  if (!s->clnt.am_connected) {
+  if (!s->clnt.am_connected && !s->no_clnt) {
     log(env, "making connection attempt");
     // printf("made %d connection attempts, sending \"hi\"\n", s->clnt.tries);
     ToHostMsg msg = { .kind = ToHostMsgKind_Ping };

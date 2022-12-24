@@ -3,7 +3,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>help im trapped in stick man factory</title>
+  <title>CedQuest TM¢</title>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="description" content="" />
@@ -27,8 +27,10 @@
   const ts_start = Date.now();
   let instance;
 
-  const to_host = [];
   const to_clnt = [];
+  const ws = new WebSocket("wss://ced.quest/ws");
+  await new Promise(res => ws.onopen = res);
+  ws.onmessage = msg => msg.data.arrayBuffer().then(d => to_clnt.push(d));
 
   const env = {
     print_f: console.log,
@@ -46,35 +48,22 @@
 
     env_send_to_host: (buf, len) => {
       const src = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      const cpy = new Uint8Array(len);
-      cpy.set(src);
-      to_host.unshift(cpy);
-    },
-    env_host_recv: (addr, buf, len) => {
-      if (to_host.length == 0) return 0;
-
-      const dst = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      dst.set(to_host.pop());
-
-      new Uint32Array(instance.exports.memory.buffer, addr)[0] = 4269;
-
-      return 1;
-    },
-
-    env_send: (addr, buf, len) => {
-      const src = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      const cpy = new Uint8Array(len);
-      cpy.set(src);
-      to_clnt.unshift(cpy);
+      const msg = new Uint8Array(len);
+      msg.set(src);
+      ws.send(msg);
     },
     env_clnt_recv: (buf, len) => {
       if (to_clnt.length == 0) return 0;
 
       const dst = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      dst.set(to_clnt.pop());
+      dst.set(new Uint8Array(to_clnt.pop()));
 
       return 1;
     },
+
+    /* no */
+    env_host_recv: (addr, buf, len) => { return 0 },
+    env_send: (addr, buf, len) => { return 0 },
 
     env_ts: () => (Date.now() - ts_start) / 1000,
 
