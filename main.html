@@ -3,7 +3,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>CedQuest TM¢</title>
+  <title>help im trapped in stick man factory</title>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="description" content="" />
@@ -23,14 +23,173 @@
 <body>
   <canvas id="draw"></canvas>
   <script>
+const log = (...args) => {
+  // console.log(...args.map(x => JSON.stringify(x, null, 2)));
+  return args[args.length - 1];
+}
+const log_ = (...args) => {
+  console.log(...args.map(x => JSON.stringify(x, null, 2)));
+  return args[args.length - 1];
+}
+
+const peer_config = {
+  'iceServers': [
+    { 'urls': 'stun:stun.stunprotocol.org:3478' },
+    { 'urls': 'stun:stun.l.google.com:19302'    },
+  ]
+};
+async function webrtc_client(ws) {
+  /* the signaling server doesn't parse our messages to keep things simple,
+   * but it does only send us messages from the host.
+   * 
+   * however, we need to uniquely identify it to the host so it can sort out
+   * everyone's connections. */
+  const id = Math.floor(Math.random()*1e9);
+  const send = msg => ws.send(JSON.stringify(log("send", { id, ...msg })));
+
+  const pc = new RTCPeerConnection(peer_config);
+  const dc = pc.createDataChannel("both", {negotiated: true, id: 0});
+  const ret = new Promise(res => dc.onopen = _ => res(dc));
+
+  pc.onicecandidate = ({candidate}) => send({ice: candidate});
+
+  let haveRemoteDesc = false;
+  let candidateBacklog = [];
+  ws.onmessage = async msg => {
+    const signal = log("recv", JSON.parse(msg.data));
+    console.log("message addressed to", signal.id);
+    if (signal.id != id) return;
+    console.log("(that's us!)");
+
+    // Only create answers in response to offers
+    if (signal.sdp) {
+      await pc.setRemoteDescription(signal.sdp);
+
+      haveRemoteDesc = true;
+      for (const signal of candidateBacklog)
+        if (signal.ice !== null) pc.addIceCandidate(signal.ice);
+
+      if (signal.sdp.type == 'offer') {
+        const desc = await pc.createAnswer();
+        pc.setLocalDescription(desc);
+        send({ sdp: desc });
+      }
+    } else if (signal.ice) {
+      if (haveRemoteDesc) {
+        if (signal.ice !== null) pc.addIceCandidate(signal.ice);
+      } else
+        candidateBacklog.push(signal);
+    }
+  }
+
+  /* let 'em know we're here */
+  console.log("sending offer");
+  const desc = await pc.createOffer();
+  pc.setLocalDescription(desc);
+  send({ sdp: desc });
+
+  return await ret;
+}
+
+async function webrtc_host(ws, onjoin) {
+
+  const clients = new Map();
+  const client_handler = id => {
+    const send = msg => {
+      console.log("trying to send as host ...");
+      ws.send(JSON.stringify(log("send", { id, ...msg })));
+    }
+
+    const pc = new RTCPeerConnection(peer_config);
+    const dc = pc.createDataChannel("both", {negotiated: true, id: 0});
+    dc.onopen = _ => onjoin(dc);
+
+    pc.onicecandidate = ({candidate}) => send({ice: candidate});
+
+    let haveRemoteDesc = false;
+    let candidateBacklog = [];
+    return async signal => {
+      console.log('processing', signal);
+
+      // Only create answers in response to offers
+      if (signal.sdp) {
+        await pc.setRemoteDescription(signal.sdp);
+
+        haveRemoteDesc = true;
+        for (const signal of candidateBacklog)
+          if (signal.ice !== null) pc.addIceCandidate(signal.ice);
+
+        if (signal.sdp.type == 'offer') {
+          const desc = await pc.createAnswer();
+          pc.setLocalDescription(desc);
+          send({ sdp: desc });
+        }
+      } else if (signal.ice) {
+        if (haveRemoteDesc) {
+          if (signal.ice !== null) pc.addIceCandidate(signal.ice);
+        } else
+          candidateBacklog.push(signal);
+      }
+    }
+  };
+
+  ws.onmessage = async msg => {
+    const signal = log("recv", JSON.parse(msg.data));
+    console.log("message from", signal.id);
+
+    if (!clients.has(signal.id))
+      console.log("(new kid on the block)"),
+        clients.set(signal.id, client_handler(signal.id));
+    else
+      console.log("(we know them)");
+
+    await clients.get(signal.id)(signal);
+  }
+}
+
+async function peer(net) {
+  const ws = new WebSocket("wss://ceds.quest/ws");
+  await new Promise(res => ws.onopen = res);
+
+  const host = await new Promise(res => {
+    ws.onmessage = msg => res(JSON.parse(msg.data).host)
+  });
+
+  if (host) {
+    console.log("hosting");
+    await webrtc_host(ws, dc => {
+      const rbyte = () => Math.floor(Math.random() * 255);
+      const addr = [...Array(4)].map(rbyte).join('.');
+      net.host.clnt_socks[addr] = dc;
+      console.log("some nerd connected", { addr });
+
+      dc.onmessage = msg => {
+        const data = new Uint8Array(msg.data);
+        net.host.to_host.unshift({ addr, data });
+      }
+    });
+
+    /* cursed but, our local client can't use our websocket LMFAO */
+    await peer(net);
+    return;
+  }
+
+  console.log("clienting");
+  const dc = await webrtc_client(ws);
+  console.log('connected to host');
+  dc.onmessage = msg => {
+    net.clnt.to_clnt.unshift(new Uint8Array(msg.data))
+  };
+  net.clnt.send = data => dc.send(data);
+}
+
 (async () => {
   const ts_start = Date.now();
   let instance;
 
-  const to_clnt = [];
-  const ws = new WebSocket("wss://ced.quest/ws");
-  await new Promise(res => ws.onopen = res);
-  ws.onmessage = msg => msg.data.arrayBuffer().then(d => to_clnt.push(d));
+  let net = { clnt: { to_clnt: [], send: () => {} },
+              host: { to_host: [], clnt_socks: {} }, };
+  await peer(net);
 
   const env = {
     print_f: console.log,
@@ -48,22 +207,50 @@
 
     env_send_to_host: (buf, len) => {
       const src = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      const msg = new Uint8Array(len);
-      msg.set(src);
-      ws.send(msg);
+      const cpy = new Uint8Array(len);
+      cpy.set(src);
+      net.clnt.send(cpy);
+      /* just dc.send */
     },
-    env_clnt_recv: (buf, len) => {
-      if (to_clnt.length == 0) return 0;
+    env_host_recv: (addr_ptr, buf, len) => {
+      if (net.host.to_host.length == 0) return 0;
 
-      const dst = new Uint8Array(instance.exports.memory.buffer, buf, len);
-      dst.set(new Uint8Array(to_clnt.pop()));
+      const mem = instance.exports.memory.buffer;
+      const dst = new Uint8Array(mem, buf, len);
+      const { data, addr } = net.host.to_host.pop();
+      dst.set(data);
+
+      const bytes = addr.split('.');
+      new Uint8Array(mem, addr_ptr)[0] = parseInt(bytes[0]);
+      new Uint8Array(mem, addr_ptr)[1] = parseInt(bytes[1]);
+      new Uint8Array(mem, addr_ptr)[2] = parseInt(bytes[2]);
+      new Uint8Array(mem, addr_ptr)[3] = parseInt(bytes[3]);
+
+      /* host array of bufs with source addr/ids, this pops */
 
       return 1;
     },
 
-    /* no */
-    env_host_recv: (addr, buf, len) => { return 0 },
-    env_send: (addr, buf, len) => { return 0 },
+    env_send: (addr_ptr, buf, len) => {
+      const mem = instance.exports.memory.buffer;
+      const src = new Uint8Array(mem, buf, len);
+      const cpy = new Uint8Array(len);
+      cpy.set(src);
+
+      /* host maintains map of addr/id -> dc/sock, grab n send */
+      const addr = new Uint8Array(mem, addr_ptr, 4).join('.');
+      net.host.clnt_socks[addr].send(cpy);
+    },
+    env_clnt_recv: (buf, len) => {
+      if (net.clnt.to_clnt.length == 0) return 0;
+
+      const dst = new Uint8Array(instance.exports.memory.buffer, buf, len);
+      dst.set(net.clnt.to_clnt.pop());
+
+      /* dc.onmessage pushes into this */
+
+      return 1;
+    },
 
     env_ts: () => (Date.now() - ts_start) / 1000,
 
@@ -95,7 +282,7 @@
     canvas.style["left"] = (w - canvas.width)/2 + "px";
     canvas.style["top"] = (h - canvas.height)/2 + "px";
 
-    const pixels = instance.exports.init(canvas.width, canvas.height);
+    const pixels = instance.exports.init(canvas.width, canvas.height, 1);
     const screen = new Uint8ClampedArray(
       instance.exports.memory.buffer,
       pixels,
