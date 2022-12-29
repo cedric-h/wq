@@ -27,10 +27,34 @@
   const ts_start = Date.now();
   let instance;
 
+  const host_dc = await new Promise(res => {
+    const ws = new WebSocket("wss://ceds.quest/ws:8080");
+
+    ws.onopen = () => {
+      const rtc = new RTCPeerConnection({ 'iceServers': [
+        { 'urls': 'stun:stun.stunprotocol.org:3478' },
+        { 'urls': 'stun:stun.l.google.com:19302'    },
+      ]});
+      rtc.onicecanddiate = candidate => ws.send({ candidate });
+      ws.onmessage = async msg => {
+        const json = JSON.parse(msg.data);
+        if (json.sdp) {
+          await rtc.setRemoteDescription(json);
+
+          if (json.type == "offer") {
+            const desc = await rtc.createAnswer();
+            await rtc.setLocalDescription(desc);
+            ws.send(JSON.stringify(desc));
+          }
+        }
+        if (json.candidate)
+          await rtc.addIceCandidate(json)
+      }
+      rtc.ondatachannel = ({ channel }) => res(channel);
+    }
+  });
   const to_clnt = [];
-  const ws = new WebSocket("wss://ced.quest/ws");
-  await new Promise(res => ws.onopen = res);
-  ws.onmessage = msg => msg.data.arrayBuffer().then(d => to_clnt.push(d));
+  host_dc.onmessage = ({ data }) => to_clnt.unshift(data);
 
   const env = {
     print_f: console.log,
@@ -50,7 +74,7 @@
       const src = new Uint8Array(instance.exports.memory.buffer, buf, len);
       const msg = new Uint8Array(len);
       msg.set(src);
-      ws.send(msg);
+      host_dc.send(msg);
     },
     env_clnt_recv: (buf, len) => {
       if (to_clnt.length == 0) return 0;
