@@ -916,6 +916,8 @@ typedef struct { uint32_t tick_until; EntId dealt_by, dealt_to; } HitTableEntry;
  * not sure if that is actually useful, we may use them exclusively for the networking */
 #define WQ_ENTS_MAX (1 << 10)
 typedef struct {
+  uint32_t screen[270][480];
+
   /* --- dbg --- */
   LogNode *log;
   int log_open;
@@ -1100,7 +1102,7 @@ static void rcx_p(int x, int y, uint32_t p) {
   if (y < 0 || y >= _rcx->raw_size.y) return;
 
   /* y is up, yall */
-  y = _rcx->raw_size.y - y - 1;
+  y = (_rcx->raw_size.y - 1) - y;
 
   int i = y*_rcx->stride + x;
   if (_rcx->cfg.alpha < 1.0f) {
@@ -1404,7 +1406,7 @@ static int rcx_ent_swing(Env *env, ClntEnt *ent) {
 }
 
 
-EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
+EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
   t_begin(__FUNCTION__);
 
   float dt = env->ts() - state(env)->clnt.ts_last;
@@ -1415,43 +1417,28 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
   Rcx __rcx = {
     .pixels = pixels,
     .stride = stride,
-    .raw_size = { env->win_size.x, env->win_size.y }
+    // .raw_size = { _rcx->raw_size.x, _rcx->raw_size.y }
   };
   _rcx = &__rcx;
 
   rcx_cfg_default();
 
-  /* what's the biggest we can be and preserve 16x9? */
+  /* what's the biggest we can be and preserve 16x9?
   {
     int aspect_x = env->win_size.x/16.f;
     int aspect_y = env->win_size.y/ 9.f;
     float scale = (aspect_x < aspect_y) ? aspect_x : aspect_y;
     _rcx->size.x = 16 * scale;
     _rcx->size.y =  9 * scale;
-  }
-
-  /* update cursor position based on mouse + (possibly) new size */
-  {
-    float x = env->mouse.x,
-          y = env->mouse.y;
-
-    /* y is up, yall */
-    y = env->win_size.y - y - 1;
-
-    /* put it on the centered, 16:9 "canvas" */
-    x -= (env->win_size.x - _rcx->size.x)/2;
-    y -= (env->win_size.y - _rcx->size.y)/2;
-
-    state(env)->clnt.cursor.x = x;
-    state(env)->clnt.cursor.y = y;
-  }
-
+  } */
+  _rcx->size.x = _rcx->raw_size.x = 480;
+  _rcx->size.y = _rcx->raw_size.y = 270;
 
   {
     t_begin("bg");
 
     /* clear to black */
-    memset(pixels, 0, env->win_size.x * env->win_size.y * sizeof(uint32_t));
+    memset(pixels, 0, _rcx->raw_size.x * _rcx->raw_size.y * sizeof(uint32_t));
 
     t_end();
   }
@@ -1783,6 +1770,57 @@ EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
 
   t_end();
 }
+
+EXPORT void wq_render(Env *env, uint32_t *pixels, int stride) {
+  State *s = state(env);
+
+  wq_render_to_screen(env, (uint32_t *)s->screen, 480);
+
+  int size_x = 480;
+  int size_y = 270;
+
+  int scale_x = env->win_size.x / size_x;
+  int scale_y = env->win_size.y / size_y;
+  int scale = (scale_x < scale_y) ? scale_x : scale_y;
+  if (scale < 1) scale = 1;
+
+  int scaled_x = size_x*scale;
+  int scaled_y = size_y*scale;
+
+  /* update cursor position based on mouse + (possibly) new size */
+  {
+    float x = env->mouse.x,
+          y = env->mouse.y;
+
+    /* y is up, yall */
+    y = env->win_size.y - y - 1;
+
+    /* put it on the centered, 16:9 "canvas" */
+    x -= (env->win_size.x - scaled_x)/2;
+    y -= (env->win_size.y - scaled_y)/2;
+
+    /* account for scaling */
+    x /= (float)scale;
+    y /= (float)scale;
+
+    state(env)->clnt.cursor.x = x;
+    state(env)->clnt.cursor.y = y;
+  }
+
+  memset(pixels, 0, sizeof(uint32_t)*env->win_size.y*stride);
+  for (int y = 0; y < scaled_y; y++)
+    for (int x = 0; x < scaled_x; x++) {
+      /* center src on dst */
+      int dst_x = x + (env->win_size.x - scaled_x)/2;
+      int dst_y = y + (env->win_size.y - scaled_y)/2;
+
+      int src_x = x/scale;
+      int src_y = y/scale;
+
+      pixels[dst_y*stride + dst_x] = s->screen[src_y][src_x];
+    }
+}
+
 /* --- rcx --- */
 
 
