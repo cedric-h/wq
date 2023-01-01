@@ -1,5 +1,5 @@
 // vim: sw=2 ts=2 expandtab smartindent
-// #include <stdio.h>
+#include <stdio.h>
 // #include <math.h>
 #define t_begin(str) env->trace_begin((char *)(str), sizeof(str))
 #define t_end() env->trace_end()
@@ -921,6 +921,7 @@ typedef struct {
   /* --- dbg --- */
   LogNode *log;
   int log_open;
+  struct { char buf[32]; int cursor; } msg;
   double frametime_ring_buffer[256];
   int frametime_ring_index, frametime_ring_len;
   /* --- dbg --- */
@@ -972,6 +973,7 @@ typedef struct {
 
 } State;
 INIT_HACK(State)
+#define CHAT_MSG_SIZE (sizeof(((State *)0)->msg.buf))
 
 /* can't use static because DLL constantly reloading */
 static State *state(Env *env) {
@@ -1664,6 +1666,19 @@ EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
     t_begin("log");
     _rcx->cfg.text_color = 0xBBBBBBBB;
 
+    /* msg being typed */
+    if (state(env)->log_open) {
+      State *s = state(env);
+
+      char msg[] = "PRESS ESC TO QUIT TYPING! ";
+      rcx_str(_rcx->size.x - sizeof(msg)*8, 8*3, msg);
+
+      rcx_str(0, 2, s->msg.buf);
+      if ((int)(env->ts()*3.2)%2) _rcx->cfg.text_color = 0xFFFFFFFF;
+      rcx_char(s->msg.cursor*8, 2, 1, 0);
+    _rcx->cfg.text_color = 0xBBBBBBBB;
+    }
+
     // int scale = _rcx->cfg.text_size = (_rcx->size.y/20/8);
     int scale = _rcx->cfg.text_size = 1;
     int x = 0, y = 1*8*scale;
@@ -2140,6 +2155,7 @@ typedef enum {
   ToClntMsgKind_BloodSecs,
   ToClntMsgKind_ShakeSecs,
   ToClntMsgKind_Spurt,
+  ToClntMsgKind_Say,
 } ToClntMsgKind;
 
 typedef struct {
@@ -2154,6 +2170,8 @@ typedef struct {
     /* _BloodSecs */ float add_blood_secs;
     /* _ShakeSecs */ float add_shake_secs;
     /* _Spurt */ struct { SpurtKind kind; float x, y, angle; } spurt;
+
+    /* _Say   */ struct { char buf[CHAT_MSG_SIZE]; } msg;
   };
 } ToClntMsg;
 
@@ -2163,6 +2181,7 @@ typedef enum {
   ToHostMsgKind_Move,
   ToHostMsgKind_Swing,
   ToHostMsgKind_Quaff,
+  ToHostMsgKind_Say,
 } ToHostMsgKind;
 
 typedef struct {
@@ -2170,6 +2189,7 @@ typedef struct {
   union {
     /* ToHostMsgKind_Move  */ struct { float x, y; } move;
     /* ToHostMsgKind_Swing */ struct { float dir; } swing;
+    /* ToHostMsgKind_Say   */ struct { char buf[CHAT_MSG_SIZE]; } msg;
   };
 } ToHostMsg;
 
@@ -4434,6 +4454,19 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
     env->send(addr, (void *)&msg, sizeof(msg));
   }
 
+  if (msg->kind == ToHostMsgKind_Say) {
+    /* tell everyone what they said! */
+    ToClntMsg out_msg = { .kind = ToClntMsgKind_Say };
+    memcpy(&out_msg.msg.buf, &msg->msg.buf, sizeof(out_msg.msg.buf));
+
+    for (int i = 0; i < CLIENTS_MAX; i++) {
+      Client *c = state(env)->host.clients + i;
+      if (c->state == ClientState_Inactive) continue;
+
+      env->send(&c->addr, (void *)&out_msg, sizeof(out_msg));
+    }
+  }
+
   if (msg->kind == ToHostMsgKind_Quaff) {
     /* yum ... :1 */
     HostEnt *pc_e = host_ent_get(env, client->pc);
@@ -4515,6 +4548,9 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
 
   if (msg->kind == ToClntMsgKind_Ping)
     log(env, "got host Ping!");
+  if (msg->kind == ToClntMsgKind_Say) {
+    log(env, msg->msg.buf);
+  }
   if (msg->kind == ToClntMsgKind_Map) {
     State *s = state(env);
     if (msg->map != s->clnt.map_key) {
@@ -4662,11 +4698,43 @@ EXPORT void wq_mousebtn(Env *env, int down) {
   env->send_to_host((void *)&msg, sizeof(msg));
 }
 
+EXPORT void wq_chartyped(Env *env, char c) {
+  State *s = state(env);
+
+  if (!s->log_open) return;
+
+  if (c == 8)
+    s->msg.buf[--s->msg.cursor] = 0;
+  else
+  if (c == 13) {
+    ToHostMsg msg = { .kind = ToHostMsgKind_Say };
+    memcpy(&msg.msg.buf, s->msg.buf, sizeof(s->msg.buf));
+    env->send_to_host((void *)&msg, sizeof(msg));
+
+    memset(s->msg.buf, 0, sizeof(s->msg.buf)),
+    s->msg.cursor = 0;
+  } else
+  if (s->msg.cursor < (sizeof(s->msg.buf)-1))
+    s->msg.buf[s->msg.cursor++] = c;
+
+  if (s->msg.cursor < 0) s->msg.cursor = 0;
+}
 EXPORT void wq_keyboard(Env *env, char c, int down) {
   State *s = state(env);
 
+  // char str[256] = {0};
+  // sprintf(str, "you pressed %d", c);
+  // log(env, str);
+  if (c == WqVk_T && !s->log_open && !down) {
+    s->log_open = 1;
+  }
+  if (c == WqVk_Esc && down && s->log_open) {
+    s->log_open = 0;
+    return;
+  }
+
 #ifndef __wasm__
-  if (c == WqVk_Esc  ) {
+  if (c == WqVk_Esc && down) {
     log(env, "restarting everything");
 
     free(env->stash.buf);
@@ -4674,11 +4742,6 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
     state(env);
   }
 #endif
-
-  // char str[256] = {0};
-  // sprintf(str, "you pressed %d", c);
-  // log(env, str);
-  if (c == WqVk_T) s->log_open = down;
 
   if (c == WqVk_Tilde && down) {
     log(env, "recompiling ...");
@@ -4698,6 +4761,7 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
     env->dbg_dylib_reload();
   }
 
+  if (s->log_open && down) return;
 
   s->clnt.keysdown[(int)c] = down;
 

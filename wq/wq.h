@@ -133,25 +133,28 @@ typedef struct {
 } Env;
 
 #ifdef __wasm__
-static void _wq_render  (Env *env, uint32_t *pixels, int stride);
-static void _wq_update  (Env *env);
-static void _wq_keyboard(Env *env, char vk, int down);
-static void _wq_mousebtn(Env *env, int down);
+static void _wq_render   (Env *env, uint32_t *pixels, int stride);
+static void _wq_update   (Env *env);
+static void _wq_keyboard (Env *env, char vk, int down);
+static void _wq_mousebtn (Env *env, int down);
+static void _wq_chartyped(Env *env, char c);
 #else
-EXPORT void _wq_render  (Env *env, uint32_t *pixels, int stride);
-EXPORT void _wq_update  (Env *env);
-EXPORT void _wq_keyboard(Env *env, char vk, int down);
-EXPORT void _wq_mousebtn(Env *env, int down);
+EXPORT void _wq_render   (Env *env, uint32_t *pixels, int stride);
+EXPORT void _wq_update   (Env *env);
+EXPORT void _wq_keyboard (Env *env, char vk, int down);
+EXPORT void _wq_mousebtn (Env *env, int down);
+EXPORT void _wq_chartyped(Env *env, char c);
 #endif
 
 #ifdef WQ_HOST_ENV // obviously dylib doesn't need to know
 #include "wq/dylib.h"
 
 typedef struct {
-  void (*wq_render  )(Env *env, uint32_t *pixels, int stride);
-  void (*wq_update  )(Env *env);
-  void (*wq_keyboard)(Env *env, char vk, int down);
-  void (*wq_mousebtn)(Env *env, int down);
+  void (*wq_render   )(Env *env, uint32_t *pixels, int stride);
+  void (*wq_update   )(Env *env);
+  void (*wq_keyboard )(Env *env, char vk, int down);
+  void (*wq_mousebtn )(Env *env, int down);
+  void (*wq_chartyped)(Env *env, char c);
 } wq_DylibHook;
 
 static wq_DylibHook wq_dylib_hook_init(void) {
@@ -159,10 +162,11 @@ static wq_DylibHook wq_dylib_hook_init(void) {
 
   wq_DylibHook ret = {0};
 
-  ret.wq_render   = dylib_get("_wq_render");
-  ret.wq_update   = dylib_get("_wq_update");
-  ret.wq_keyboard = dylib_get("_wq_keyboard");
-  ret.wq_mousebtn = dylib_get("_wq_mousebtn");
+  ret.wq_render    = dylib_get("_wq_render");
+  ret.wq_update    = dylib_get("_wq_update");
+  ret.wq_keyboard  = dylib_get("_wq_keyboard");
+  ret.wq_mousebtn  = dylib_get("_wq_mousebtn");
+  ret.wq_chartyped = dylib_get("_wq_chartyped");
 
   return ret;
 }
@@ -264,10 +268,11 @@ static wq_DylibHook wq_dylib_hook_init(void) {
   #endif
 
   /* good honest christian decls, no satanic DLL trickery */
-  #define wq_render   _wq_render  
-  #define wq_update   _wq_update  
-  #define wq_keyboard _wq_keyboard
-  #define wq_mousebtn _wq_mousebtn
+  #define wq_render    _wq_render  
+  #define wq_update    _wq_update  
+  #define wq_keyboard  _wq_keyboard
+  #define wq_mousebtn  _wq_mousebtn
+  #define wq_chartyped _wq_chartyped
 
 #endif
 

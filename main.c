@@ -155,9 +155,9 @@ static LRESULT WINAPI WindowProc(
       PostQuitMessage(0);
     } return 0;
 
-    // case WM_CHAR: {
-    //   wq_lib.wq_input(&env, wparam);
-    // } return 0;
+    case WM_CHAR: {
+      wq_lib.wq_chartyped(&env, wparam);
+    } return 0;
 
     case WM_LBUTTONDOWN: {
       env.mouse.x = GET_X_LPARAM(lparam);
