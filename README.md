@@ -122,7 +122,7 @@ typedef struct {
 } OsStore;
 
 /* returns 0 if our environment could do enough embiggening
- * (idk man maybe you compile to WASM and you're hitting limits of LocalStorage) */
+ * (idk man maybe you compile to WASM and you're hitting limits of LocalStorage)
  * (obviously don't copy this API if it doesn't represent the reasonable behavior of your targets) */
 int os_store_embiggen(int new_size);
 ```
