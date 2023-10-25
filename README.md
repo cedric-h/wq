@@ -6,7 +6,7 @@ Rare, I know.
 
 But let's say that's you. Your main looks something like this:
 
-```
+```c
 typedef struct { /* ... */ } GameState;
 
 static struct {
