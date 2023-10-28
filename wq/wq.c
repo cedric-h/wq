@@ -1,5 +1,8 @@
 // vim: sw=2 ts=2 expandtab smartindent
+#ifndef __wasm__
 #include <stdio.h>
+#endif
+
 // #include <math.h>
 #define t_begin(str) env->trace_begin((char *)(str), sizeof(str))
 #define t_end() env->trace_end()
@@ -1724,13 +1727,14 @@ EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
     s->frametime_ring_len += s->frametime_ring_len < 256;
     s->frametime_ring_buffer[s->frametime_ring_index] = env->ts() - start_ts;
 
+    int len = 20;
+    int scale = 8*(_rcx->cfg.text_size = 1);
+
+#ifndef __wasm__
     double average = 0.0;
     for (int i = 0; i < 256; i++) average += s->frametime_ring_buffer[i];
     average /= s->frametime_ring_len;
 
-    int len = 20;
-    int scale = 8*(_rcx->cfg.text_size = 1);
-#ifndef __wasm__
     char buf[32] = {0};
     snprintf(
       buf, sizeof(buf),
