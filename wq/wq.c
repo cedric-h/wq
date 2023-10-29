@@ -1,15 +1,14 @@
 // vim: sw=2 ts=2 expandtab smartindent
-#ifndef __wasm__
-#include <stdio.h>
-#endif
 
-// #include <math.h>
 #define t_begin(str) env->trace_begin((char *)(str), sizeof(str))
 #define t_end() env->trace_end()
 #define ARR_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 
 #include "wq.h"
 #include "font.h"
+#define NANOPRINTF_IMPLEMENTATION
+#define NANOPRINTF_VISIBILITY_STATIC
+#include "nanoprintf.h"
 
 #ifdef __wasm__
 extern void print(char *, size_t);
@@ -44,33 +43,39 @@ static char *strchr(const char *str, int c) {
 #endif
 
 
-/* test multiplayer
- * interpolation
- * support multiple instances of maps
+/* [x] test multiplayer
+ * [x] test multiplayer (more?)
+ * [ ] interpolation
+ * [ ] support multiple instances of maps
  *
  * [ ] use Rock * in sawmill
- * remove use of env->ts() for host timing
- * make Ahquicker slightly longer
- * add signaling b4 attack to 'w's, 'e's && 'm's
- * gradual health regen
- * 
+ * [ ] remove use of env->ts() for host timing
+ *
+ * [ ] add signaling b4 attack to 'w's, 'e's && 'm's
+ *
  * bugs:
- *   can hold more than 3 hp_pots
- *   sometimes sawminions linger during sucking,
- *   sometimes sawminions teleport at start of knockback
+ *   [ ] can hold more than 3 hp_pots
+ *   [ ] curious behavior when run in debug mode (investigate? ts for timing?)
+ *   [ ] lingering entities from last level? wtf? networking?
+ *   [ ] sometimes sawminions linger during sucking,
+ *   [ ] sometimes sawminions teleport at start of knockback
  *
- * combat enhancements ???
- *   "rage" bar that tracks combos?
- *   - increase speed proportional to rage
+ * --- do i still want to do this? --
+
+ * [ ] make Ahquicker slightly longer (?)
+ * [ ] gradual health regen
+ * 
+ * [ ] combat enhancements ???
+ *       "rage" bar that tracks combos?
+ *       - increase speed proportional to rage
  *
- *   add "magic" bar, special attacks?
+ *       add "magic" bar, special attacks?
  *
- *
- *   rage for combos simply increases speed
- *   can acquire sashes that change what rage does?
- *   e.g. more rage, chance to reflect bullets
- *        more rage, quicker attacks
- *        sash where proximity to bullets gives rage
+ *       rage for combos simply increases speed
+ *       can acquire sashes that change what rage does?
+ *       e.g. more rage, chance to reflect bullets
+ *            more rage, quicker attacks
+ *            sash where proximity to bullets gives rage
  */
 
 /* TODO: worry about this eventually
@@ -98,22 +103,15 @@ void *calloc(size_t nmemb, size_t size);
 #define MATH_TAU 6.283185307179586
 /* how long it take to take a swig? */
 #define QUAFF_SECONDS (1.5f)
+/* how many ticks in a second? */
+#define TICK_SECOND (20)
 /* how long between quaff messages before we cancel your quaff? */
 #define QUAFF_LAPSE (QUAFF_SECONDS/8)
 #define GOLDEN_RATIO (1.61803f)
 
-static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
 
-static float inline lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
-#define inv_lerp(min, max, p) (((p) - (min)) / ((max) - (min)))
-static float inline lerp_rads(float a, float b, float t) {
-  float difference = fmodf(b - a, MATH_PI*2.0f),
-        distance = fmodf(2.0f * difference, MATH_PI*2.0f) - difference;
-  return a + distance * t;
-}
-static float inline fabsf(float f) { return f < 0 ? -f : f; }
-static inline float signf(float f) { return f < 0 ? -1 : 1; }
 #ifdef CUSTOM_MATH
+static float inline fabsf(float f) { return f < 0 ? -f : f; }
 static inline float fmodf(float f, float n) { return f - (float)(n * (int)(f/n)); }
 static inline float floorf(float f) { return (int)f; }
 static inline float ceilf(float f) { return (int)f + 1; }
@@ -194,8 +192,19 @@ static inline float sqrtf(float z) {
 	return val.f;		/* Interpret again as float */
 }
 #else
-#define log print_log
+#include <math.h>
 #endif
+
+static float inline ease_out_quad(float x) { return 1 - (1 - x) * (1 - x); }
+
+static float inline lerp(float v0, float v1, float t) { return (1 - t) * v0 + t * v1; }
+#define inv_lerp(min, max, p) (((p) - (min)) / ((max) - (min)))
+static float inline lerp_rads(float a, float b, float t) {
+  float difference = fmodf(b - a, MATH_PI*2.0f),
+        distance = fmodf(2.0f * difference, MATH_PI*2.0f) - difference;
+  return a + distance * t;
+}
+static inline float signf(float f) { return f < 0 ? -1 : 1; }
 
 /* vector fns (only things that don't generalize to N=1) */
 static inline float mag(float x, float y) { return sqrtf(x*x + y*y); }
@@ -249,7 +258,7 @@ static int line_hits_circle(LineHitsCircle *lhc) {
 
 
 /* forward decls */
-static void log(Env *e, char *p);
+static void say(Env *e, char *p);
 
 /* --- map --- */
 #define map_tile_world_size (90)
@@ -648,6 +657,18 @@ typedef struct {
   float x, y;
   uint8_t you, sword;
   uint16_t hp, max_hp;
+} EntUpd;
+
+typedef struct {
+  struct {
+    EntUpd upd;
+    double ts;
+  } served_last, served_next;
+
+  char looks;
+  float x, y;
+  uint8_t you, sword;
+  uint16_t hp, max_hp;
 
   struct { double ts_start, ts_end; float dir; } swing;
 } ClntEnt;
@@ -676,13 +697,6 @@ typedef struct {
   SpurtKind kind;
   float x, y, angle; /* angle is for wedges */
 } Spurt;
-
-typedef struct {
-  char looks;
-  float x, y;
-  uint8_t you, sword;
-  uint16_t hp, max_hp;
-} EntUpd;
 
 typedef struct {
   double ts_start, ts_end;
@@ -1001,7 +1015,7 @@ static State *state(Env *env) {
 
     state(env)->host.map_key = MapKey_Tutorial;
 
-    log(env, "sup nerd");
+    say(env, "sup nerd");
     /* --- init state --- */
   }
   return (State *)env->stash.buf;
@@ -1027,11 +1041,11 @@ static ClntEnt *clnt_ent_you(Env *env) {
 
 /* --- log --- */
 #ifdef __wasm__
-static void log(Env *env, char *p) {
+static void say(Env *env, char *p) {
   print(p, strlen(p));
 }
 #else
-static void log(Env *env, char *p) {
+static void say(Env *env, char *p) {
   int len = strlen(p);
 
   /* maintain linked list */
@@ -1562,9 +1576,30 @@ EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
     }
     _rcx->cfg.text_color = 0xFFFFFFFF;
 
+    float now = env->ts();
     for (int i = 0; i < WQ_ENTS_MAX; i++) {
       ClntEnt *e = s->clnt.ents + i;
-      if (!e->looks) continue;
+
+      if (!e->served_next.upd.looks) continue;
+      if (!e->served_last.upd.looks) continue;
+
+      {
+        EntUpd *served_last = &e->served_last.upd;
+        EntUpd *served_next = &e->served_next.upd;
+
+        /* no  itnerpolatee! */
+        e->you    = served_next->you;
+        e->sword  = served_next->sword;
+        e->looks  = served_next->looks;
+        e->max_hp = served_next->max_hp;
+        e->hp     = served_next->hp;
+
+        /* yes itnerpolatee! */
+        float delta = 1.0 / TICK_SECOND;
+        float t = inv_lerp(e->served_last.ts, e->served_next.ts, now - delta);
+        e->x      = lerp(served_last->x, served_next->x, t);
+        e->y      = lerp(served_last->y, served_next->y, t);
+      }
 
       char c = e->looks;
       if (e->you) c = 'u';
@@ -1736,7 +1771,7 @@ EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
     average /= s->frametime_ring_len;
 
     char buf[32] = {0};
-    snprintf(
+    npf_snprintf(
       buf, sizeof(buf),
       "%.1fms\n%dx%d",
       1000*average, _rcx->size.x, _rcx->size.y
@@ -1746,7 +1781,7 @@ EXPORT void wq_render_to_screen(Env *env, uint32_t *pixels, int stride) {
             _rcx->size.y - scale*2, buf);
 
     memset(buf, 0, sizeof(buf));
-    snprintf(buf, len, "%d/3 health potions", s->clnt.hp_pots);
+    npf_snprintf(buf, len, "%d/3 health potions", s->clnt.hp_pots);
     rcx_str(_rcx->size.x - scale*len,
                            scale*1, buf);
 #endif
@@ -1860,7 +1895,7 @@ static Client *clients_storage(Env *env) {
   for (int i = 0; i < CLIENTS_MAX; i++)
     if (clients[i].state == ClientState_Inactive)
       return clients + i;
-  log(env, "too many clients! dropping one");
+  say(env, "too many clients! dropping one");
   return NULL;
 }
 
@@ -1880,9 +1915,6 @@ static void eit_zero_out_host_ents(EntIdTable *eit, Env *env) {
       if (e) *e = (HostEnt) {0};
     }
 }
-
-/* how many ticks in a second? */
-#define TICK_SECOND (20)
 
 /* basically, debounces hits.
  * returns 0 if already present, inserts and returns 1 otherwise */
@@ -2763,7 +2795,7 @@ static void host_tick_players(Env *env) {
           });
 
         if (t < 1.0f) break;
-        log(env, "i weep for you, truly.");
+        say(env, "i weep for you, truly.");
 
         pc_e->x = pc_e->y = 0.0f;
         pc_e->hp = pc_e->max_hp;
@@ -3736,7 +3768,7 @@ static void ahq_den_test(
         mi.ty == map_y_from_world(stuff_map, trespasser->y)) {
       den->triggered = 1;
 
-      // log(env, "YOU STEPPED ON MY TRAP CARD");
+      // say(env, "YOU STEPPED ON MY TRAP CARD");
       {
         MapIter mi = { .map = stuff_map };
         for (int al_i = 0; map_iter(&mi, spawn_at_c); al_i++) {
@@ -4453,7 +4485,7 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
 
   if (msg->kind == ToHostMsgKind_Ping) {
     /* echo! */
-    log(env, "(host) echoing back Ping!");
+    say(env, "(host) echoing back Ping!");
     ToClntMsg msg = { .kind = ToClntMsgKind_Ping };
     env->send(addr, (void *)&msg, sizeof(msg));
   }
@@ -4498,7 +4530,7 @@ static void host_recv(Env *env, Addr *addr, uint8_t *buf, int len) {
         /* probably important to reset these idk */
         client->tick_quaff_earliest = client->tick_quaff_last = 0;
 
-        log(env, "*gulps greedily*");
+        say(env, "*gulps greedily*");
         ts_spurt_nearby(env, map_tile_world_size*3.0f, &(TsSpurt) {
           .kind = SpurtKind_HpPotGulp,
           .x    = pc_e->x,
@@ -4539,21 +4571,21 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
   ToClntMsg *msg = (ToClntMsg *)buf;
 #if 0
   switch (msg->kind) {
-  case ToClntMsgKind_Ping:      log(env, "ToClntMsgKind_Ping"); break;
-  case ToClntMsgKind_Map:       log(env, "ToClntMsgKind_Map"); break;
-  case ToClntMsgKind_EntUpd:    log(env, "ToClntMsgKind_EntUpd"); break;
-  case ToClntMsgKind_HpPots:    log(env, "ToClntMsgKind_HpPots"); break;
-  case ToClntMsgKind_Swing:     log(env, "ToClntMsgKind_Swing"); break;
-  case ToClntMsgKind_BloodSecs: log(env, "ToClntMsgKind_BloodSecs"); break;
-  case ToClntMsgKind_ShakeSecs: log(env, "ToClntMsgKind_ShakeSecs"); break;
-  case ToClntMsgKind_Spurt:     log(env, "ToClntMsgKind_Spurt"); break;
+  case ToClntMsgKind_Ping:      say(env, "ToClntMsgKind_Ping"); break;
+  case ToClntMsgKind_Map:       say(env, "ToClntMsgKind_Map"); break;
+  case ToClntMsgKind_EntUpd:    say(env, "ToClntMsgKind_EntUpd"); break;
+  case ToClntMsgKind_HpPots:    say(env, "ToClntMsgKind_HpPots"); break;
+  case ToClntMsgKind_Swing:     say(env, "ToClntMsgKind_Swing"); break;
+  case ToClntMsgKind_BloodSecs: say(env, "ToClntMsgKind_BloodSecs"); break;
+  case ToClntMsgKind_ShakeSecs: say(env, "ToClntMsgKind_ShakeSecs"); break;
+  case ToClntMsgKind_Spurt:     say(env, "ToClntMsgKind_Spurt"); break;
   }
 #endif
 
   if (msg->kind == ToClntMsgKind_Ping)
-    log(env, "got host Ping!");
+    say(env, "got host Ping!");
   if (msg->kind == ToClntMsgKind_Say) {
-    log(env, msg->msg.buf);
+    say(env, msg->msg.buf);
   }
   if (msg->kind == ToClntMsgKind_Map) {
     State *s = state(env);
@@ -4571,14 +4603,10 @@ static void clnt_recv(Env *env, uint8_t *buf, int len) {
 
     if (tick >= s->clnt.last_known_tick) {
       s->clnt.last_known_tick = tick;
-      /* this is probably fine */
-      s->clnt.ents[msg->ent_upd.id].you    = msg->ent_upd.ent.you;
-      s->clnt.ents[msg->ent_upd.id].sword  = msg->ent_upd.ent.sword;
-      s->clnt.ents[msg->ent_upd.id].x      = msg->ent_upd.ent.x;
-      s->clnt.ents[msg->ent_upd.id].y      = msg->ent_upd.ent.y;
-      s->clnt.ents[msg->ent_upd.id].looks  = msg->ent_upd.ent.looks;
-      s->clnt.ents[msg->ent_upd.id].max_hp = msg->ent_upd.ent.max_hp;
-      s->clnt.ents[msg->ent_upd.id].hp     = msg->ent_upd.ent.hp;
+
+      s->clnt.ents[msg->ent_upd.id].served_last = s->clnt.ents[msg->ent_upd.id].served_next;
+      s->clnt.ents[msg->ent_upd.id].served_next.upd = msg->ent_upd.ent;
+      s->clnt.ents[msg->ent_upd.id].served_next.ts  = env->ts();
     }
   }
   if (msg->kind == ToClntMsgKind_HpPots) {
@@ -4629,7 +4657,7 @@ EXPORT void wq_update(Env *env) {
 
   /* better get yourself connected */
   if (!s->clnt.am_connected && !s->no_clnt) {
-    log(env, "making connection attempt");
+    say(env, "making connection attempt");
     // printf("made %d connection attempts, sending \"hi\"\n", s->clnt.tries);
     ToHostMsg msg = { .kind = ToHostMsgKind_Ping };
     env->send_to_host((void *)&msg, sizeof(msg));
@@ -4639,7 +4667,7 @@ EXPORT void wq_update(Env *env) {
       /* Tried 10 times to reach server ...
        * still no luck ... so I'll serve myself! */
       s->am_host = 1;
-      log(env, "gonna try to host ...");
+      say(env, "gonna try to host ...");
     }
   }
 
@@ -4728,7 +4756,7 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
 
   // char str[256] = {0};
   // sprintf(str, "you pressed %d", c);
-  // log(env, str);
+  // say(env, str);
   if (c == WqVk_T && !s->log_open && !down) {
     s->log_open = 1;
   }
@@ -4739,7 +4767,7 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
 
 #ifndef __wasm__
   if (c == WqVk_Esc && down) {
-    log(env, "restarting everything");
+    say(env, "restarting everything");
 
     free(env->stash.buf);
     env->stash.buf = NULL;
@@ -4748,10 +4776,15 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
 #endif
 
   if (c == WqVk_Tilde && down) {
-    log(env, "recompiling ...");
+    say(env, "recompiling ...");
     char buf[1024*2*2*2] = {0};
     int len = sizeof(buf);
     env->dbg_sys_run("cl /nologo /Zi /O2 /WX /LD ../wq/wq.c /link /out:wq.dll", buf, &len);
+
+    // env->dbg_sys_run("cl /nologo /Zi /O2 /WX /LD ../wq/wq.c /link /out:wq.dll", buf, &len);
+    // env->dbg_sys_run("tcc -shared -Wall -Werror -DCUSTOM_MATH -o wq.dll ../wq/wq.c", buf, &len);
+    // env->dbg_sys_run("clang ../wq/wq.c -O3 -Wall --shared -o wq.dll", buf, &len);
+
 
     // env->dbg_sys_run(
     //   "tcc -shared -DCUSTOM_MATH=1 -o wq.dll ../wq/wq.c",
@@ -4759,8 +4792,8 @@ EXPORT void wq_keyboard(Env *env, char c, int down) {
     // );
 
     buf[sizeof(buf)-1] = 0; /* just in case */
-    log(env, buf);
-    log(env, "recompilation done!");
+    say(env, buf);
+    say(env, "recompilation done!");
 
     env->dbg_dylib_reload();
   }
